@@ -55,98 +55,135 @@ function validarCliente(body, { partial = false } = {}) {
 }
 
 // GET /api/clientes — listado con filtros y búsqueda
-router.get('/', (req, res) => {
-  const { estado, segmento, canal_origen, empresa, q } = req.query;
-  const filtros = {};
-  if (estado && ESTADOS.includes(estado)) filtros.estado = estado;
-  if (segmento && SEGMENTOS.includes(segmento)) filtros.segmento = segmento;
-  if (canal_origen && CANALES.includes(canal_origen)) filtros.canal_origen = canal_origen;
-  if (empresa) filtros.empresa = String(empresa).trim();
-  if (q) filtros.q = String(q).trim();
-
-  res.json({ clientes: clientes.list(filtros) });
+router.get('/', async (req, res, next) => {
+  try {
+    const { estado, segmento, canal_origen, empresa, q } = req.query;
+    const filtros = {};
+    if (estado && ESTADOS.includes(estado)) filtros.estado = estado;
+    if (segmento && SEGMENTOS.includes(segmento)) filtros.segmento = segmento;
+    if (canal_origen && CANALES.includes(canal_origen)) filtros.canal_origen = canal_origen;
+    if (empresa) filtros.empresa = String(empresa).trim();
+    if (q) filtros.q = String(q).trim();
+    res.json({ clientes: await clientes.list(filtros) });
+  } catch (err) { next(err); }
 });
 
 // GET /api/clientes/empresas — nombres de empresa distintos (para filtro)
-router.get('/empresas', (req, res) => {
-  res.json({ empresas: clientes.listEmpresas() });
+router.get('/empresas', async (req, res, next) => {
+  try {
+    res.json({ empresas: await clientes.listEmpresas() });
+  } catch (err) { next(err); }
 });
 
 // GET /api/clientes/alertas — clientes sin pedido reciente (solo admin)
-router.get('/alertas', requireAdmin, (req, res) => {
-  res.json({ alertDays: ALERT_DAYS, alertas: clientes.listAlertas() });
+router.get('/alertas', requireAdmin, async (req, res, next) => {
+  try {
+    res.json({ alertDays: ALERT_DAYS, alertas: await clientes.listAlertas() });
+  } catch (err) { next(err); }
 });
 
 // GET /api/clientes/kpis — KPIs del dashboard (solo admin)
-router.get('/kpis', requireAdmin, (req, res) => {
-  res.json({
-    total_activos: clientes.countActivos(),
-    alertas: clientes.countAlertas(),
-    altas_mes: clientes.countAltasMes(),
-    bajas_mes: clientes.countBajasMes(),
-    ticket_promedio_general: clientes.ticketPromedioGeneral(),
-    ticket_promedio_segmento: clientes.ticketPromedioPorSegmento(),
-    evolucion_activos: clientes.evolucionActivosPorMes(6),
-    alert_days: ALERT_DAYS,
-  });
+router.get('/kpis', requireAdmin, async (req, res, next) => {
+  try {
+    const [
+      total_activos,
+      alertas,
+      altas_mes,
+      bajas_mes,
+      ticket_promedio_general,
+      ticket_promedio_segmento,
+      evolucion_activos,
+    ] = await Promise.all([
+      clientes.countActivos(),
+      clientes.countAlertas(),
+      clientes.countAltasMes(),
+      clientes.countBajasMes(),
+      clientes.ticketPromedioGeneral(),
+      clientes.ticketPromedioPorSegmento(),
+      clientes.evolucionActivosPorMes(6),
+    ]);
+    res.json({
+      total_activos,
+      alertas,
+      altas_mes,
+      bajas_mes,
+      ticket_promedio_general,
+      ticket_promedio_segmento,
+      evolucion_activos,
+      alert_days: ALERT_DAYS,
+    });
+  } catch (err) { next(err); }
 });
 
 // GET /api/clientes/:id — ficha + historial de pedidos
-router.get('/:id', (req, res) => {
-  const cliente = clientes.getById(req.params.id);
-  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
-  const colaboradores = cliente.empresa ? clientes.listColaboradores(cliente.empresa, cliente.id) : [];
-  res.json({ cliente, pedidos: pedidos.listByCliente(cliente.id), colaboradores });
+router.get('/:id', async (req, res, next) => {
+  try {
+    const cliente = await clientes.getById(req.params.id);
+    if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+    const [colaboradores, historialPedidos] = await Promise.all([
+      cliente.empresa ? clientes.listColaboradores(cliente.empresa, cliente.id) : Promise.resolve([]),
+      pedidos.listByCliente(cliente.id),
+    ]);
+    res.json({ cliente, pedidos: historialPedidos, colaboradores });
+  } catch (err) { next(err); }
 });
 
 // POST /api/clientes — crear cliente nuevo (operador y admin)
-router.post('/', (req, res) => {
-  const { data, errores } = validarCliente(req.body || {});
-  if (errores.length) return res.status(400).json({ error: errores.join('. ') });
+router.post('/', async (req, res, next) => {
+  try {
+    const { data, errores } = validarCliente(req.body || {});
+    if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
-  if (clientes.existsCedula(data.cedula)) {
-    return res.status(409).json({ error: 'Ya existe un cliente con esa cédula' });
-  }
+    if (await clientes.existsCedula(data.cedula)) {
+      return res.status(409).json({ error: 'Ya existe un cliente con esa cédula' });
+    }
 
-  const cliente = clientes.create(data);
-  res.status(201).json({ cliente });
+    const cliente = await clientes.create(data);
+    res.status(201).json({ cliente });
+  } catch (err) { next(err); }
 });
 
 // PUT /api/clientes/:id — editar datos básicos (operador y admin)
-router.put('/:id', (req, res) => {
-  const cliente = clientes.getById(req.params.id);
-  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+router.put('/:id', async (req, res, next) => {
+  try {
+    const cliente = await clientes.getById(req.params.id);
+    if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-  const { data, errores } = validarCliente(req.body || {});
-  if (errores.length) return res.status(400).json({ error: errores.join('. ') });
+    const { data, errores } = validarCliente(req.body || {});
+    if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
-  if (clientes.existsCedula(data.cedula, cliente.id)) {
-    return res.status(409).json({ error: 'Ya existe otro cliente con esa cédula' });
-  }
+    if (await clientes.existsCedula(data.cedula, cliente.id)) {
+      return res.status(409).json({ error: 'Ya existe otro cliente con esa cédula' });
+    }
 
-  const actualizado = clientes.update(cliente.id, data);
-  res.json({ cliente: actualizado });
+    const actualizado = await clientes.update(cliente.id, data);
+    res.json({ cliente: actualizado });
+  } catch (err) { next(err); }
 });
 
 // PUT /api/clientes/:id/estado — cambiar estado (solo admin)
-router.put('/:id/estado', requireAdmin, (req, res) => {
-  const cliente = clientes.getById(req.params.id);
-  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+router.put('/:id/estado', requireAdmin, async (req, res, next) => {
+  try {
+    const cliente = await clientes.getById(req.params.id);
+    if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-  const { estado } = req.body || {};
-  if (!ESTADOS.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
+    const { estado } = req.body || {};
+    if (!ESTADOS.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
 
-  const actualizado = clientes.updateEstado(cliente.id, estado);
-  res.json({ cliente: actualizado });
+    const actualizado = await clientes.updateEstado(cliente.id, estado);
+    res.json({ cliente: actualizado });
+  } catch (err) { next(err); }
 });
 
 // PATCH /api/clientes/:id/seguimiento — marcar seguimiento de una alerta (solo admin)
-router.patch('/:id/seguimiento', requireAdmin, (req, res) => {
-  const cliente = clientes.getById(req.params.id);
-  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+router.patch('/:id/seguimiento', requireAdmin, async (req, res, next) => {
+  try {
+    const cliente = await clientes.getById(req.params.id);
+    if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-  const actualizado = clientes.marcarSeguimiento(cliente.id);
-  res.json({ cliente: actualizado });
+    const actualizado = await clientes.marcarSeguimiento(cliente.id);
+    res.json({ cliente: actualizado });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

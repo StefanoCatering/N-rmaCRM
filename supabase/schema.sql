@@ -1,0 +1,54 @@
+-- =============================================================
+-- Närma CRM — Schema PostgreSQL (Supabase)
+-- Ejecutar una sola vez en el SQL Editor de Supabase.
+-- Todas las sentencias son idempotentes (IF NOT EXISTS).
+-- =============================================================
+
+-- ── Tablas ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS usuarios (
+  id            SERIAL PRIMARY KEY,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  rol           TEXT NOT NULL CHECK (rol IN ('operador','admin')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS clientes (
+  id                  SERIAL PRIMARY KEY,
+  nombre_completo     TEXT NOT NULL,
+  cedula              TEXT NOT NULL UNIQUE,
+  email               TEXT,
+  telefono            TEXT,
+  segmento            TEXT NOT NULL CHECK (segmento IN ('particular','empresa')),
+  empresa             TEXT,
+  canal_origen        TEXT NOT NULL CHECK (canal_origen IN ('whatsapp','redes','embajador','boca_a_boca','b2b','otro')),
+  codigo_embajador    TEXT,
+  estado              TEXT NOT NULL DEFAULT 'activo' CHECK (estado IN ('activo','pausado','inactivo','baja')),
+  fecha_ingreso       DATE NOT NULL,
+  seguimiento_marcado INTEGER NOT NULL DEFAULT 0,
+  seguimiento_fecha   DATE,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pedidos (
+  id            SERIAL PRIMARY KEY,
+  cliente_id    INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+  fecha_pedido  DATE NOT NULL,
+  monto         INTEGER NOT NULL,
+  monto_pagado  INTEGER,
+  estado_pago   TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado_pago IN ('pagado','pendiente')),
+  medio_pago    TEXT CHECK (medio_pago IN ('efectivo','transferencia','tarjeta','pos')),
+  tipo_vianda   TEXT CHECK (tipo_vianda IN ('economico','saludable','low_carb')),
+  descripcion   TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── Índices ───────────────────────────────────────────────────
+
+CREATE INDEX IF NOT EXISTS idx_pedidos_cliente_id ON pedidos(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_pedidos_fecha       ON pedidos(fecha_pedido);
+CREATE INDEX IF NOT EXISTS idx_clientes_estado     ON clientes(estado);
+CREATE INDEX IF NOT EXISTS idx_clientes_segmento   ON clientes(segmento);
+CREATE INDEX IF NOT EXISTS idx_clientes_empresa    ON clientes(empresa);
