@@ -138,6 +138,16 @@ function updateEstado(id, estado) {
   return getById(id);
 }
 
+// Marca el seguimiento de un cliente en alerta (lo deja persistido en la base
+// con la fecha en que se marcó), para el botón "Marcar seguimiento" del dashboard.
+function marcarSeguimiento(id) {
+  db.prepare(`
+    UPDATE clientes SET seguimiento_marcado = 1, seguimiento_fecha = strftime('%Y-%m-%d','now')
+    WHERE id = ?
+  `).run(id);
+  return getById(id);
+}
+
 // ── KPIs del dashboard ──────────────────────────────────────────
 
 function countActivos() {
@@ -219,6 +229,7 @@ module.exports = {
   create,
   update,
   updateEstado,
+  marcarSeguimiento,
   listEmpresas,
   listColaboradores,
   countActivos,

@@ -132,7 +132,10 @@
                   <td>${SEGMENTO_LABEL[c.segmento]}</td>
                   <td>${fmtFecha(c.ultimo_pedido)}</td>
                   <td><strong>${c.dias_sin_pedir}</strong> días</td>
-                  <td><button class="btn-secondary btn-seguimiento" data-id="${c.id}">Marcar seguimiento</button></td>
+                  <td>${c.seguimiento_marcado
+                    ? `<button class="btn-secondary btn-seguimiento" disabled>Seguimiento marcado ✓ (${fmtFecha(c.seguimiento_fecha)})</button>`
+                    : `<button class="btn-secondary btn-seguimiento" data-id="${c.id}">Marcar seguimiento</button>`
+                  }</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -140,10 +143,19 @@
         </div>
       `;
 
-      cont.querySelectorAll('.btn-seguimiento').forEach(btn => {
-        btn.addEventListener('click', () => {
-          btn.textContent = 'Seguimiento marcado ✓';
+      cont.querySelectorAll('.btn-seguimiento[data-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
           btn.disabled = true;
+          const textoOriginal = btn.textContent;
+          try {
+            const { cliente } = await api(`/api/clientes/${id}/seguimiento`, { method: 'PATCH' });
+            btn.textContent = `Seguimiento marcado ✓ (${fmtFecha(cliente.seguimiento_fecha)})`;
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = textoOriginal;
+            alert(err.message || 'No se pudo marcar el seguimiento');
+          }
         });
       });
     }

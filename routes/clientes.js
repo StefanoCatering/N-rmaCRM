@@ -140,4 +140,13 @@ router.put('/:id/estado', requireAdmin, (req, res) => {
   res.json({ cliente: actualizado });
 });
 
+// PATCH /api/clientes/:id/seguimiento — marcar seguimiento de una alerta (solo admin)
+router.patch('/:id/seguimiento', requireAdmin, (req, res) => {
+  const cliente = clientes.getById(req.params.id);
+  if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
+
+  const actualizado = clientes.marcarSeguimiento(cliente.id);
+  res.json({ cliente: actualizado });
+});
+
 module.exports = router;

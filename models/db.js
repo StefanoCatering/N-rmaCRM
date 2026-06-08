@@ -54,4 +54,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_clientes_empresa ON clientes(empresa);
 `);
 
+// ── Migraciones incrementales (ALTER TABLE) ──────────────────────
+// Agregan columnas a bases ya existentes sin recrear tablas ni perder datos.
+// Cada bloque verifica primero si la columna ya existe (PRAGMA table_info)
+// para que sea seguro ejecutar esto en cada arranque del servidor.
+function columnaExiste(tabla, columna) {
+  return db.prepare(`PRAGMA table_info(${tabla})`).all().some((c) => c.name === columna);
+}
+
+if (!columnaExiste('clientes', 'seguimiento_marcado')) {
+  db.exec('ALTER TABLE clientes ADD COLUMN seguimiento_marcado INTEGER NOT NULL DEFAULT 0;');
+}
+if (!columnaExiste('clientes', 'seguimiento_fecha')) {
+  db.exec('ALTER TABLE clientes ADD COLUMN seguimiento_fecha TEXT;');
+}
+
 module.exports = db;
