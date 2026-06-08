@@ -1,0 +1,19 @@
+{
+  "name": "narma-crm",
+  "version": "1.0.0",
+  "description": "CRM de clientes para Närma — gestión de clientes, pedidos y seguimiento comercial",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0"
+  }
+}

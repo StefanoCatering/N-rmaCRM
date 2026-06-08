@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · nuevo pedido</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view" style="max-width:560px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">nuevo pedido</div>
+          <div class="view-header-sub">Registrá un pedido para un cliente existente</div>
+        </div>
+        <a href="/clientes" class="btn-secondary">← Volver</a>
+      </div>
+
+      <div class="card">
+        <div id="form-error" class="form-error hidden"></div>
+
+        <div class="form-group" style="position:relative;">
+          <label class="form-label">Cliente</label>
+          <input type="text" id="f-cliente-buscar" placeholder="Buscar por nombre o cédula..." autocomplete="off"/>
+          <div id="cliente-resultados" class="card hidden" style="position:absolute;z-index:10;width:100%;margin-top:4px;padding:6px;max-height:220px;overflow-y:auto;"></div>
+          <input type="hidden" id="f-cliente-id"/>
+          <div id="cliente-seleccionado" class="nota hidden mt-8"></div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Fecha del pedido</label>
+            <input type="date" id="f-fecha"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Monto (Gs.)</label>
+            <input type="number" id="f-monto" placeholder="Ej: 185000" step="1" min="1"/>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tipo de vianda</label>
+          <select id="f-tipo-vianda">
+            <option value="">— No especifica —</option>
+            <option value="economico">Económico</option>
+            <option value="saludable">Saludable</option>
+            <option value="low_carb">Low Carb</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Medio de pago</label>
+            <select id="f-medio-pago">
+              <option value="">— No especifica —</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="pos">POS</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Estado de pago</label>
+            <select id="f-estado-pago">
+              <option value="pendiente">Pendiente</option>
+              <option value="pagado">Pagado</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Monto pagado (Gs.)</label>
+          <input type="number" id="f-monto-pagado" placeholder="Dejar vacío si todavía no se pagó nada" step="1" min="0"/>
+          <div class="nota mt-8">Útil para registrar pagos parciales. Si marcás "Pagado" y dejás esto vacío, se asume el monto completo.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Descripción</label>
+          <textarea id="f-descripcion" placeholder="Ej: Vianda saludable semanal x5"></textarea>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-guardar">Registrar pedido</button>
+          <a href="/clientes" class="btn-secondary">Cancelar</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    let timerBuscar = null;
+    let clienteSeleccionado = null;
+
+    (async function () {
+      await ensureSession();
+      renderNav('/clientes');
+
+      document.getElementById('f-fecha').value = new Date().toISOString().slice(0, 10);
+
+      const params = new URLSearchParams(window.location.search);
+      const clienteIdPre = params.get('cliente_id');
+      if (clienteIdPre) {
+        try {
+          const { cliente } = await api(`/api/clientes/${clienteIdPre}`);
+          seleccionarCliente(cliente);
+        } catch (e) { /* ignorar si no existe */ }
+      }
+
+      const inputBuscar = document.getElementById('f-cliente-buscar');
+      inputBuscar.addEventListener('input', () => {
+        clienteSeleccionado = null;
+        document.getElementById('f-cliente-id').value = '';
+        document.getElementById('cliente-seleccionado').classList.add('hidden');
+        clearTimeout(timerBuscar);
+        const q = inputBuscar.value.trim();
+        if (!q) { document.getElementById('cliente-resultados').classList.add('hidden'); return; }
+        timerBuscar = setTimeout(() => buscarClientes(q), 250);
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#cliente-resultados') && e.target.id !== 'f-cliente-buscar') {
+          document.getElementById('cliente-resultados').classList.add('hidden');
+        }
+      });
+
+      document.getElementById('btn-guardar').addEventListener('click', guardar);
+    })();
+
+    async function buscarClientes(q) {
+      const { clientes } = await api('/api/clientes?q=' + encodeURIComponent(q));
+      const cont = document.getElementById('cliente-resultados');
+      if (!clientes.length) {
+        cont.innerHTML = '<div class="empty-state" style="padding:10px;">Sin resultados.</div>';
+      } else {
+        cont.innerHTML = clientes.slice(0, 8).map(c => `
+          <div class="cliente-resultado-item" data-id="${c.id}" style="padding:8px 10px;cursor:pointer;border-radius:8px;font-size:11px;">
+            <strong>${c.nombre_completo}</strong> <span class="text-muted">· ${c.cedula} · ${SEGMENTO_LABEL[c.segmento]}</span>
+          </div>
+        `).join('');
+        cont.querySelectorAll('.cliente-resultado-item').forEach(el => {
+          el.addEventListener('mouseenter', () => el.style.background = 'var(--beige)');
+          el.addEventListener('mouseleave', () => el.style.background = '');
+          el.addEventListener('click', () => {
+            const cliente = clientes.find(c => c.id === Number(el.dataset.id));
+            seleccionarCliente(cliente);
+          });
+        });
+      }
+      cont.classList.remove('hidden');
+    }
+
+    function seleccionarCliente(cliente) {
+      clienteSeleccionado = cliente;
+      document.getElementById('f-cliente-id').value = cliente.id;
+      document.getElementById('f-cliente-buscar').value = '';
+      document.getElementById('cliente-resultados').classList.add('hidden');
+      const sel = document.getElementById('cliente-seleccionado');
+      sel.textContent = `Cliente seleccionado: ${cliente.nombre_completo} (${cliente.cedula})`;
+      sel.classList.remove('hidden');
+    }
+
+    async function guardar() {
+      const errorBox = document.getElementById('form-error');
+      errorBox.classList.add('hidden');
+
+      if (!clienteSeleccionado) {
+        errorBox.textContent = 'Buscá y seleccioná un cliente.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      const monto = parseInt(document.getElementById('f-monto').value, 10);
+      const montoPagadoStr = document.getElementById('f-monto-pagado').value.trim();
+      const payload = {
+        cliente_id: clienteSeleccionado.id,
+        fecha_pedido: document.getElementById('f-fecha').value,
+        monto,
+        monto_pagado: montoPagadoStr ? parseInt(montoPagadoStr, 10) : null,
+        estado_pago: document.getElementById('f-estado-pago').value,
+        medio_pago: document.getElementById('f-medio-pago').value,
+        tipo_vianda: document.getElementById('f-tipo-vianda').value,
+        descripcion: document.getElementById('f-descripcion').value.trim(),
+      };
+
+      const btn = document.getElementById('btn-guardar');
+      btn.disabled = true;
+      btn.textContent = 'Guardando...';
+      try {
+        await api('/api/pedidos', { method: 'POST', body: payload });
+        window.location.href = `/clientes/${clienteSeleccionado.id}`;
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Registrar pedido';
+      }
+    }
+  </script>
+</body>
+</html>

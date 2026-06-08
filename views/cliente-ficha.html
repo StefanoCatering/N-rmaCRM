@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · ficha de cliente</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view">
+      <div class="view-header">
+        <a href="/clientes" class="btn-secondary">← Volver a clientes</a>
+      </div>
+
+      <div id="ficha-cont"><div class="empty-state">Cargando...</div></div>
+    </div>
+  </div>
+
+  <!-- Modal cambiar estado (solo admin) -->
+  <div id="modal-estado" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:360px;width:100%;">
+      <div class="card-title">cambiar estado del cliente</div>
+      <div class="form-group">
+        <label class="form-label">Nuevo estado</label>
+        <select id="modal-estado-select">
+          <option value="activo">Activo</option>
+          <option value="pausado">Pausado</option>
+          <option value="inactivo">Inactivo</option>
+          <option value="baja">Baja</option>
+        </select>
+      </div>
+      <div id="modal-estado-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-estado-confirmar">Confirmar</button>
+        <button class="btn-secondary" id="modal-estado-cancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const clienteId = window.location.pathname.split('/').pop();
+    let clienteActual = null;
+
+    (async function () {
+      await ensureSession();
+      renderNav('/clientes');
+      await cargarFicha();
+
+      document.getElementById('modal-estado-cancelar').addEventListener('click', () => {
+        document.getElementById('modal-estado').classList.add('hidden');
+      });
+      document.getElementById('modal-estado-confirmar').addEventListener('click', confirmarCambioEstado);
+    })();
+
+    async function cargarFicha() {
+      let data;
+      try {
+        data = await api(`/api/clientes/${clienteId}`);
+      } catch (e) {
+        document.getElementById('ficha-cont').innerHTML = `<div class="empty-state">${e.message}</div>`;
+        return;
+      }
+      clienteActual = data.cliente;
+      renderFicha(data.cliente, data.pedidos, data.colaboradores || []);
+    }
+
+    function renderFicha(c, pedidos, colaboradores) {
+      const enAlerta = c.dias_sin_pedir !== null && c.dias_sin_pedir > window.ALERT_DAYS;
+      const esAdmin = CURRENT_USER.rol === 'admin';
+
+      document.getElementById('ficha-cont').innerHTML = `
+        <div class="cliente-header-card">
+          <div class="cliente-avatar">${initials(c.nombre_completo)}</div>
+          <div style="flex:1;min-width:200px;">
+            <div class="cliente-nombre">${c.nombre_completo}</div>
+            <div class="cliente-sub">${SEGMENTO_LABEL[c.segmento]}${c.empresa ? ' · ' + c.empresa : ''} · ${CANAL_LABEL[c.canal_origen]}${c.codigo_embajador ? ' · ' + c.codigo_embajador : ''}</div>
+          </div>
+          <div>${badgeEstado(c.estado)}</div>
+        </div>
+
+        ${enAlerta ? `
+          <div class="alerta-banner">
+            ⚠ Este cliente no registra pedidos hace ${c.dias_sin_pedir} días (umbral de alerta: ${window.ALERT_DAYS} días).
+          </div>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-title">datos del cliente</div>
+          <div class="cliente-info-grid">
+            <div class="cliente-info-item"><span class="form-label">Cédula</span><div class="cliente-info-value">${c.cedula}</div></div>
+            ${c.empresa ? `<div class="cliente-info-item"><span class="form-label">Empresa</span><div class="cliente-info-value">${c.empresa}</div></div>` : ''}
+            <div class="cliente-info-item"><span class="form-label">Email</span><div class="cliente-info-value">${c.email || '—'}</div></div>
+            <div class="cliente-info-item"><span class="form-label">Teléfono</span><div class="cliente-info-value">${c.telefono || '—'}</div></div>
+            <div class="cliente-info-item"><span class="form-label">Fecha de ingreso</span><div class="cliente-info-value">${fmtFecha(c.fecha_ingreso)}</div></div>
+          </div>
+          ${esAdmin ? `
+          <div class="btn-row">
+            <button class="btn-secondary" id="btn-cambiar-estado">Cambiar estado</button>
+          </div>` : ''}
+        </div>
+
+        ${c.empresa ? `
+        <div class="card">
+          <div class="card-title">colaboradores de ${c.empresa}</div>
+          ${colaboradores.length ? `
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Nombre</th><th>Cédula</th><th>Estado</th><th></th></tr></thead>
+                <tbody>
+                  ${colaboradores.map(col => `
+                    <tr>
+                      <td><strong>${col.nombre_completo}</strong></td>
+                      <td>${col.cedula}</td>
+                      <td>${badgeEstado(col.estado)}</td>
+                      <td><a href="/clientes/${col.id}" class="btn-secondary">Ver ficha</a></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : `<div class="empty-state">No hay otros colaboradores registrados de ${c.empresa}.</div>`}
+          <a href="/clientes?empresa=${encodeURIComponent(c.empresa)}" class="nota mt-8" style="display:inline-block;">Ver todos los clientes de esta empresa →</a>
+        </div>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-title">resumen de pedidos</div>
+          <div class="metric-grid">
+            <div class="metric metric-blue">
+              <div class="metric-label">Cantidad de pedidos</div>
+              <div class="metric-value">${c.cantidad_pedidos}</div>
+            </div>
+            <div class="metric metric-green">
+              <div class="metric-label">Ticket promedio</div>
+              <div class="metric-value" style="font-size:16px;">${c.ticket_promedio ? fmtGs(c.ticket_promedio) : '—'}</div>
+            </div>
+            <div class="metric metric-orange">
+              <div class="metric-label">Ticket total</div>
+              <div class="metric-value" style="font-size:16px;">${c.ticket_total ? fmtGs(c.ticket_total) : '—'}</div>
+            </div>
+            <div class="metric metric-yellow">
+              <div class="metric-label">Días sin pedir</div>
+              <div class="metric-value">${c.dias_sin_pedir !== null ? c.dias_sin_pedir : '—'}</div>
+            </div>
+          </div>
+          <a href="/pedidos/nuevo?cliente_id=${c.id}" class="btn-primary">+ Registrar nuevo pedido</a>
+        </div>
+
+        <div class="card">
+          <div class="card-title">historial de pedidos</div>
+          ${pedidos.length ? `
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Fecha</th><th>Monto</th><th>Pagado</th><th>Estado pago</th><th>Medio de pago</th><th>Tipo de vianda</th><th>Descripción</th></tr></thead>
+                <tbody>
+                  ${pedidos.map(p => `
+                    <tr>
+                      <td>${fmtFecha(p.fecha_pedido)}</td>
+                      <td><strong>${fmtGs(p.monto)}</strong></td>
+                      <td>${p.monto_pagado !== null && p.monto_pagado !== undefined ? fmtGs(p.monto_pagado) : '—'}</td>
+                      <td>${badgeEstadoPago(p.estado_pago)}</td>
+                      <td>${p.medio_pago ? MEDIO_PAGO_LABEL[p.medio_pago] : '—'}</td>
+                      <td>${p.tipo_vianda ? TIPO_VIANDA_LABEL[p.tipo_vianda] : '—'}</td>
+                      <td style="white-space:normal;">${p.descripcion || '—'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : '<div class="empty-state">Este cliente todavía no registra pedidos.</div>'}
+        </div>
+      `;
+
+      const btnEstado = document.getElementById('btn-cambiar-estado');
+      if (btnEstado) {
+        btnEstado.addEventListener('click', () => {
+          document.getElementById('modal-estado-select').value = c.estado;
+          document.getElementById('modal-estado-error').classList.add('hidden');
+          document.getElementById('modal-estado').classList.remove('hidden');
+        });
+      }
+    }
+
+    async function confirmarCambioEstado() {
+      const estado = document.getElementById('modal-estado-select').value;
+      const errorBox = document.getElementById('modal-estado-error');
+      const btn = document.getElementById('modal-estado-confirmar');
+      errorBox.classList.add('hidden');
+      btn.disabled = true;
+      try {
+        await api(`/api/clientes/${clienteId}/estado`, { method: 'PUT', body: { estado } });
+        document.getElementById('modal-estado').classList.add('hidden');
+        await cargarFicha();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

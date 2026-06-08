@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · clientes</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">clientes</div>
+          <div class="view-header-sub" id="resultado-count"></div>
+        </div>
+        <a href="/clientes/nuevo" class="btn-primary">+ Nuevo cliente</a>
+      </div>
+
+      <div class="card">
+        <div class="filter-row">
+          <input type="text" id="f-buscar" placeholder="Buscar por nombre o cédula..."/>
+          <select id="f-estado">
+            <option value="">Todos los estados</option>
+            <option value="activo">Activo</option>
+            <option value="pausado">Pausado</option>
+            <option value="inactivo">Inactivo</option>
+            <option value="baja">Baja</option>
+          </select>
+          <select id="f-segmento">
+            <option value="">Todos los segmentos</option>
+            <option value="particular">Particular</option>
+            <option value="empresa">Empresa</option>
+          </select>
+          <select id="f-canal">
+            <option value="">Todos los canales</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="redes">Redes sociales</option>
+            <option value="embajador">Embajador</option>
+            <option value="boca_a_boca">Boca a boca</option>
+            <option value="b2b">B2B</option>
+            <option value="otro">Otro</option>
+          </select>
+          <select id="f-empresa">
+            <option value="">Todas las empresas</option>
+          </select>
+        </div>
+        <div id="tabla-cont"><div class="empty-state">Cargando...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    let timerBuscar = null;
+
+    (async function () {
+      await ensureSession();
+      renderNav('/clientes');
+      await cargarEmpresas();
+
+      const params = new URLSearchParams(window.location.search);
+      const empresaPre = params.get('empresa');
+      if (empresaPre) document.getElementById('f-empresa').value = empresaPre;
+
+      cargarClientes();
+
+      ['f-estado', 'f-segmento', 'f-canal', 'f-empresa'].forEach(id => {
+        document.getElementById(id).addEventListener('change', cargarClientes);
+      });
+      document.getElementById('f-buscar').addEventListener('input', () => {
+        clearTimeout(timerBuscar);
+        timerBuscar = setTimeout(cargarClientes, 300);
+      });
+    })();
+
+    async function cargarEmpresas() {
+      const { empresas } = await api('/api/clientes/empresas');
+      const sel = document.getElementById('f-empresa');
+      for (const nombre of empresas) {
+        const opt = document.createElement('option');
+        opt.value = nombre;
+        opt.textContent = nombre;
+        sel.appendChild(opt);
+      }
+    }
+
+    async function cargarClientes() {
+      const params = new URLSearchParams();
+      const q = document.getElementById('f-buscar').value.trim();
+      const estado = document.getElementById('f-estado').value;
+      const segmento = document.getElementById('f-segmento').value;
+      const canal = document.getElementById('f-canal').value;
+      const empresa = document.getElementById('f-empresa').value;
+      if (q) params.set('q', q);
+      if (estado) params.set('estado', estado);
+      if (segmento) params.set('segmento', segmento);
+      if (canal) params.set('canal_origen', canal);
+      if (empresa) params.set('empresa', empresa);
+
+      const { clientes } = await api('/api/clientes?' + params.toString());
+      renderTabla(clientes);
+    }
+
+    function renderTabla(clientes) {
+      document.getElementById('resultado-count').textContent =
+        `${clientes.length} cliente${clientes.length === 1 ? '' : 's'} encontrado${clientes.length === 1 ? '' : 's'}`;
+
+      const cont = document.getElementById('tabla-cont');
+      if (!clientes.length) {
+        cont.innerHTML = '<div class="empty-state">No se encontraron clientes con esos filtros.</div>';
+        return;
+      }
+
+      cont.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th><th>Cédula</th><th>Segmento</th><th>Empresa</th><th>Canal</th>
+                <th>Estado</th><th>Último pedido</th><th>Días sin pedir</th>
+                <th>Ticket prom.</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${clientes.map(c => {
+                const enAlerta = c.dias_sin_pedir !== null && c.dias_sin_pedir > window.ALERT_DAYS;
+                return `
+                <tr class="${enAlerta ? 'alerta-row' : ''}">
+                  <td style="white-space:normal;min-width:160px;"><strong>${c.nombre_completo}</strong></td>
+                  <td>${c.cedula}</td>
+                  <td>${SEGMENTO_LABEL[c.segmento]}</td>
+                  <td>${c.empresa || '—'}</td>
+                  <td>${CANAL_LABEL[c.canal_origen]}</td>
+                  <td>${badgeEstado(c.estado)}</td>
+                  <td>${fmtFecha(c.ultimo_pedido)}</td>
+                  <td>${diasSinPedirLabel(c.dias_sin_pedir)}</td>
+                  <td>${c.ticket_promedio ? fmtGs(c.ticket_promedio) : '—'}</td>
+                  <td><a href="/clientes/${c.id}" class="btn-secondary">Ver ficha</a></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

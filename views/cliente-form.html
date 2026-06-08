@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · nuevo cliente</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view" style="max-width:560px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">nuevo cliente</div>
+          <div class="view-header-sub">Completá los datos para registrar un cliente</div>
+        </div>
+        <a href="/clientes" class="btn-secondary">← Volver</a>
+      </div>
+
+      <div class="card">
+        <div id="form-error" class="form-error hidden"></div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Nombre completo</label>
+            <input type="text" id="f-nombre" placeholder="Ej: Lucía Benítez"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cédula</label>
+            <input type="text" id="f-cedula" placeholder="Ej: 4123456"/>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" id="f-email" placeholder="correo@ejemplo.com"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Teléfono</label>
+            <input type="tel" id="f-telefono" placeholder="09xx xxxxxx"/>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Segmento</label>
+            <select id="f-segmento">
+              <option value="particular">Particular</option>
+              <option value="empresa">Empresa</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group hidden" id="grupo-empresa">
+          <label class="form-label">Empresa a la que pertenece</label>
+          <input type="text" id="f-empresa" placeholder="Ej: Bayer"/>
+          <div class="nota mt-8">El cliente es la persona de contacto; acá indicás a qué empresa representa.</div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Canal de origen</label>
+            <select id="f-canal">
+              <option value="whatsapp">WhatsApp</option>
+              <option value="redes">Redes sociales</option>
+              <option value="embajador">Embajador</option>
+              <option value="boca_a_boca">Boca a boca</option>
+              <option value="b2b">B2B</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group hidden" id="grupo-embajador">
+          <label class="form-label">Código de embajador</label>
+          <input type="text" id="f-codigo-embajador" placeholder="Ej: EMB-014"/>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Fecha de ingreso</label>
+          <input type="date" id="f-fecha-ingreso"/>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-guardar">Guardar cliente</button>
+          <a href="/clientes" class="btn-secondary">Cancelar</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    (async function () {
+      await ensureSession();
+      renderNav('/clientes');
+
+      // fecha de ingreso por defecto: hoy
+      document.getElementById('f-fecha-ingreso').value = new Date().toISOString().slice(0, 10);
+
+      const selCanal = document.getElementById('f-canal');
+      const grupoEmbajador = document.getElementById('grupo-embajador');
+      function actualizarEmbajador() {
+        grupoEmbajador.classList.toggle('hidden', selCanal.value !== 'embajador');
+      }
+      selCanal.addEventListener('change', actualizarEmbajador);
+      actualizarEmbajador();
+
+      const selSegmento = document.getElementById('f-segmento');
+      const grupoEmpresa = document.getElementById('grupo-empresa');
+      function actualizarEmpresa() {
+        grupoEmpresa.classList.toggle('hidden', selSegmento.value !== 'empresa');
+      }
+      selSegmento.addEventListener('change', actualizarEmpresa);
+      actualizarEmpresa();
+
+      document.getElementById('btn-guardar').addEventListener('click', guardar);
+    })();
+
+    async function guardar() {
+      const errorBox = document.getElementById('form-error');
+      errorBox.classList.add('hidden');
+
+      const payload = {
+        nombre_completo: document.getElementById('f-nombre').value.trim(),
+        cedula: document.getElementById('f-cedula').value.trim(),
+        email: document.getElementById('f-email').value.trim(),
+        telefono: document.getElementById('f-telefono').value.trim(),
+        segmento: document.getElementById('f-segmento').value,
+        empresa: document.getElementById('f-empresa').value.trim(),
+        canal_origen: document.getElementById('f-canal').value,
+        codigo_embajador: document.getElementById('f-codigo-embajador').value.trim(),
+        fecha_ingreso: document.getElementById('f-fecha-ingreso').value,
+      };
+
+      const btn = document.getElementById('btn-guardar');
+      btn.disabled = true;
+      btn.textContent = 'Guardando...';
+      try {
+        const { cliente } = await api('/api/clientes', { method: 'POST', body: payload });
+        window.location.href = `/clientes/${cliente.id}`;
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Guardar cliente';
+      }
+    }
+  </script>
+</body>
+</html>

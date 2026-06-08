@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · inicio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title" id="saludo">inicio</div>
+          <div class="view-header-sub">¿Qué querés hacer hoy?</div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <a href="/clientes/nuevo" class="card" style="flex:1;min-width:220px;text-decoration:none;text-align:center;padding:32px 20px;">
+          <div style="font-size:34px;margin-bottom:8px;">＋</div>
+          <div class="card-title" style="margin-bottom:4px;">nuevo cliente</div>
+          <div class="text-muted" style="font-size:11px;">Registrar un cliente nuevo en el sistema</div>
+        </a>
+        <a href="/pedidos/nuevo" class="card" style="flex:1;min-width:220px;text-decoration:none;text-align:center;padding:32px 20px;">
+          <div style="font-size:34px;margin-bottom:8px;">＋</div>
+          <div class="card-title" style="margin-bottom:4px;">nuevo pedido</div>
+          <div class="text-muted" style="font-size:11px;">Registrar un pedido para un cliente existente</div>
+        </a>
+      </div>
+
+      <div class="card">
+        <div class="card-title">otros accesos</div>
+        <div class="btn-row">
+          <a href="/clientes" class="btn-secondary">Ver listado de clientes</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    (async function () {
+      const user = await ensureSession();
+      renderNav('/inicio');
+      if (user) document.getElementById('saludo').textContent = `hola, ${user.username}`;
+    })();
+  </script>
+</body>
+</html>

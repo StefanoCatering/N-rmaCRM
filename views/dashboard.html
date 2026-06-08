@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">dashboard</div>
+          <div class="view-header-sub">Resumen comercial y alertas de seguimiento</div>
+        </div>
+      </div>
+
+      <div class="metric-grid" id="metric-grid"></div>
+
+      <div class="card">
+        <div class="card-title">evolución de clientes activos (últimos 6 meses)</div>
+        <div id="chart-evolucion"><div class="empty-state">Cargando...</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">ticket promedio por segmento</div>
+        <div class="metric-grid" id="ticket-segmento"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">alertas — clientes sin pedido reciente</div>
+        <div id="alertas-cont"><div class="empty-state">Cargando...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    (async function () {
+      await ensureSession();
+      renderNav('/dashboard');
+      await Promise.all([cargarKpis(), cargarAlertas()]);
+    })();
+
+    async function cargarKpis() {
+      const k = await api('/api/clientes/kpis');
+
+      document.getElementById('metric-grid').innerHTML = `
+        <div class="metric metric-blue">
+          <div class="metric-label">Clientes activos</div>
+          <div class="metric-value">${k.total_activos}</div>
+          <div class="metric-sub">total</div>
+        </div>
+        <div class="metric metric-orange">
+          <div class="metric-label">Con alerta</div>
+          <div class="metric-value">${k.alertas}</div>
+          <div class="metric-sub">+${k.alert_days} días sin pedir</div>
+        </div>
+        <div class="metric metric-green">
+          <div class="metric-label">Altas del mes</div>
+          <div class="metric-value">${k.altas_mes}</div>
+          <div class="metric-sub">nuevos clientes</div>
+        </div>
+        <div class="metric metric-yellow">
+          <div class="metric-label">Bajas del mes</div>
+          <div class="metric-value">${k.bajas_mes}</div>
+          <div class="metric-sub">clientes dados de baja</div>
+        </div>
+        <div class="metric metric-pink">
+          <div class="metric-label">Ticket promedio general</div>
+          <div class="metric-value" style="font-size:16px;">${fmtGs(k.ticket_promedio_general)}</div>
+          <div class="metric-sub">todos los pedidos</div>
+        </div>
+      `;
+
+      document.getElementById('ticket-segmento').innerHTML = `
+        <div class="metric metric-blue">
+          <div class="metric-label">Particular</div>
+          <div class="metric-value" style="font-size:16px;">${fmtGs(k.ticket_promedio_segmento.particular)}</div>
+        </div>
+        <div class="metric metric-green">
+          <div class="metric-label">Empresa</div>
+          <div class="metric-value" style="font-size:16px;">${fmtGs(k.ticket_promedio_segmento.empresa)}</div>
+        </div>
+      `;
+
+      renderEvolucion(k.evolucion_activos);
+    }
+
+    function renderEvolucion(serie) {
+      const cont = document.getElementById('chart-evolucion');
+      if (!serie.length) { cont.innerHTML = '<div class="empty-state">Sin datos suficientes.</div>'; return; }
+
+      const max = Math.max(1, ...serie.map(p => p.activos));
+      const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+      cont.innerHTML = `<div class="chart-bars">${serie.map(p => {
+        const [, m] = p.mes.split('-');
+        const alto = Math.max(6, Math.round((p.activos / max) * 120));
+        return `
+          <div class="chart-bar-col">
+            <div class="chart-bar-value">${p.activos}</div>
+            <div class="chart-bar" style="height:${alto}px;"></div>
+            <div class="chart-bar-label">${MESES[parseInt(m, 10) - 1]}</div>
+          </div>`;
+      }).join('')}</div>`;
+    }
+
+    async function cargarAlertas() {
+      const { alertas, alertDays } = await api('/api/clientes/alertas');
+      const cont = document.getElementById('alertas-cont');
+
+      if (!alertas.length) {
+        cont.innerHTML = `<div class="empty-state">No hay clientes con más de ${alertDays} días sin pedir. 🎉</div>`;
+        return;
+      }
+
+      cont.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Nombre</th><th>Segmento</th><th>Último pedido</th><th>Días sin pedir</th><th></th></tr>
+            </thead>
+            <tbody>
+              ${alertas.map(c => `
+                <tr class="alerta-row">
+                  <td><a href="/clientes/${c.id}" class="link-cliente" style="font-weight:600;color:var(--navy);text-decoration:none;">${c.nombre_completo}</a></td>
+                  <td>${SEGMENTO_LABEL[c.segmento]}</td>
+                  <td>${fmtFecha(c.ultimo_pedido)}</td>
+                  <td><strong>${c.dias_sin_pedir}</strong> días</td>
+                  <td><button class="btn-secondary btn-seguimiento" data-id="${c.id}">Marcar seguimiento</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      cont.querySelectorAll('.btn-seguimiento').forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.textContent = 'Seguimiento marcado ✓';
+          btn.disabled = true;
+        });
+      });
+    }
+  </script>
+</body>
+</html>
