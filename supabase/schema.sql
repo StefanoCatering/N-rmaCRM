@@ -45,7 +45,22 @@ CREATE TABLE IF NOT EXISTS pedidos (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── Índices ───────────────────────────────────────────────────
+-- ── Tabla de sesiones (connect-pg-simple) ────────────────────
+-- Estructura exacta que espera la librería connect-pg-simple.
+-- Nota: el table.sql original de la librería usa WITH (OIDS=FALSE)
+-- que fue eliminado en PostgreSQL 14 — aquí se omite para PG 15+.
+-- La PRIMARY KEY va inline para que sea idempotente con IF NOT EXISTS.
+
+CREATE TABLE IF NOT EXISTS "session" (
+  "sid"    varchar     NOT NULL,
+  "sess"   json        NOT NULL,
+  "expire" timestamp(6) NOT NULL,
+  CONSTRAINT "session_pkey" PRIMARY KEY ("sid") NOT DEFERRABLE INITIALLY IMMEDIATE
+);
+
+CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+
+-- ── Índices de negocio ────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_pedidos_cliente_id ON pedidos(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_pedidos_fecha       ON pedidos(fecha_pedido);
