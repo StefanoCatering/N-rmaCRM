@@ -1,71 +1,75 @@
 const path = require('path');
 const express = require('express');
-const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
+const cookieParser = require('cookie-parser');
+const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 
-const config = require('./config');
-const pool = require('./models/db');
+const config = require('./config');       // también llama a dotenv.config()
 const usuarios = require('./models/usuarios');
 const clientesRouter = require('./routes/clientes');
 const pedidosRouter = require('./routes/pedidos');
+
+// Validación de arranque: JWT_SECRET es obligatorio
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET no está configurado.\n' +
+    'Agregá JWT_SECRET en Vercel (Settings → Environment Variables) ' +
+    'o en tu archivo .env local.'
+  );
+}
 
 const app = express();
 
 // ── Diagnóstico de arranque ───────────────────────────────────────
 console.log('[server] NODE_ENV:', config.NODE_ENV);
-console.log('[server] SESSION_SECRET configurado:', !!config.SESSION_SECRET);
-console.log('[server] session store: connect-pg-simple (PostgreSQL / Supabase)');
+console.log('[server] JWT_SECRET configurado: true');
+console.log('[server] auth: JWT httpOnly cookie (narma_token)');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Vercel corre detrás de un reverse proxy — sin esto Express no confía en los
-// headers X-Forwarded-* y las cookies con secure:true no se envían correctamente.
-// DEBE estar antes de app.use(session(...)).
-app.set('trust proxy', 1);
-
-app.use(session({
-  // Sesiones persistidas en Supabase (PostgreSQL) — necesario para Vercel
-  // serverless donde el MemoryStore se descarta entre invocaciones frías.
-  store: new pgSession({
-    pool,
-    tableName: 'session',
-    createTableIfMissing: true,
-  }),
-  secret: config.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: true,      // requerido para cookies en HTTPS (Vercel siempre es HTTPS)
-    sameSite: 'none',  // requerido cuando secure:true en contexto cross-site de Vercel
-    maxAge: 8 * 60 * 60 * 1000, // 8 horas
-  },
-}));
-
-// ── Middlewares de autenticación / autorización ──────────────────
-
-function requireLogin(req, res, next) {
-  console.log('[requireLogin] path:', req.path, '| sid:', req.sessionID, '| user:', JSON.stringify(req.session.user ?? null));
-  if (req.session.user) return next();
-  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'No autenticado' });
-  return res.redirect('/login');
-}
-
-function requireRole(rol) {
+// ── Middleware de autenticación / autorización ────────────────────
+// requireAuth(rol?)
+//   Sin argumento → sólo verifica que haya un JWT válido.
+//   Con 'admin' u 'operador' → también verifica el rol.
+//   Rutas /api/* → respuesta JSON 401/403.
+//   Páginas → redirect a /login.
+function requireAuth(rol) {
   return (req, res, next) => {
-    console.log('[requireRole:' + rol + '] path:', req.path, '| sid:', req.sessionID, '| user:', JSON.stringify(req.session.user ?? null));
-    if (!req.session.user) {
-      if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'No autenticado' });
+    const token = req.cookies.narma_token;
+    const isApi = req.originalUrl.startsWith('/api/');
+
+    if (!token) {
+      console.log('[requireAuth] sin token | path:', req.originalUrl);
+      if (isApi) return res.status(401).json({ error: 'No autenticado' });
       return res.redirect('/login');
     }
-    if (req.session.user.rol !== rol) {
-      if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'No autorizado' });
-      return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
+
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      req.user = { id: payload.id, username: payload.username, rol: payload.rol };
+      console.log(
+        '[requireAuth] OK | user:', req.user.username,
+        '| rol requerido:', rol || 'cualquiera',
+        '| path:', req.originalUrl
+      );
+
+      if (rol && req.user.rol !== rol) {
+        console.log('[requireAuth] FORBIDDEN | user.rol:', req.user.rol, '!= requerido:', rol);
+        if (isApi) return res.status(403).json({ error: 'No autorizado' });
+        return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
+      }
+
+      next();
+    } catch (e) {
+      console.log('[requireAuth] token inválido:', e.message, '| path:', req.originalUrl);
+      res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
+      if (isApi) return res.status(401).json({ error: 'No autenticado' });
+      return res.redirect('/login');
     }
-    next();
   };
 }
 
@@ -85,65 +89,76 @@ app.post('/api/login', async (req, res, next) => {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
-    console.log('[login] autenticado:', username, '| sid antes de save:', req.sessionID);
-    req.session.user = { id: usuario.id, username: usuario.username, rol: usuario.rol };
+    const token = jwt.sign(
+      { id: usuario.id, username: usuario.username, rol: usuario.rol },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
 
-    // Guardar sesión explícitamente antes de responder.
-    // Responder con HTTP 302 (no JSON) — el Set-Cookie viaja en la respuesta
-    // del redirect, de modo que el browser lo almacena antes de seguir la
-    // navegación y no hay condición de carrera entre JS y la cookie.
-    req.session.save((err) => {
-      if (err) {
-        console.error('[login] ERROR guardando sesión:', err.message);
-        return next(err);
-      }
-      const dest = usuario.rol === 'admin' ? '/dashboard' : '/inicio';
-      console.log('[login] sesión guardada OK — sid:', req.sessionID, '| user:', username, '| rol:', usuario.rol, '| redirect ->', dest);
-      res.redirect(dest);
+    res.cookie('narma_token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 8 * 60 * 60 * 1000, // 8 horas
     });
+
+    const dest = usuario.rol === 'admin' ? '/dashboard' : '/inicio';
+    console.log('[login] JWT generado | user:', usuario.username, '| rol:', usuario.rol, '| redirect ->', dest);
+    res.redirect(dest);
   } catch (err) { next(err); }
 });
 
 app.post('/api/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
+  res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
+  res.json({ ok: true });
 });
 
-app.get('/api/me', (req, res) => {
-  if (!req.session.user) return res.status(401).json({ error: 'No autenticado' });
-  res.json({ user: req.session.user, alertDays: config.ALERT_DAYS });
+app.get('/api/me', requireAuth(), (req, res) => {
+  res.json({ user: req.user, alertDays: config.ALERT_DAYS });
 });
 
 // ── Páginas ───────────────────────────────────────────────────────
 
 app.get('/', (req, res) => {
-  if (!req.session.user) return res.redirect('/login');
-  return res.redirect(req.session.user.rol === 'admin' ? '/dashboard' : '/inicio');
+  const token = req.cookies.narma_token;
+  if (!token) return res.redirect('/login');
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    return res.redirect(payload.rol === 'admin' ? '/dashboard' : '/inicio');
+  } catch {
+    res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
+    return res.redirect('/login');
+  }
 });
 
 app.get('/login', (req, res) => {
-  if (req.session.user) {
-    return res.redirect(req.session.user.rol === 'admin' ? '/dashboard' : '/inicio');
+  const token = req.cookies.narma_token;
+  if (token) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      return res.redirect(payload.rol === 'admin' ? '/dashboard' : '/inicio');
+    } catch { /* token inválido → mostrar login */ }
   }
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
-app.get('/dashboard', requireRole('admin'), view('dashboard.html'));
-app.get('/inicio', requireRole('operador'), view('inicio.html'));
-app.get('/clientes', requireLogin, view('clientes.html'));
-app.get('/clientes/nuevo', requireLogin, view('cliente-form.html'));
-app.get('/clientes/:id', requireLogin, view('cliente-ficha.html'));
-app.get('/pedidos/nuevo', requireLogin, view('pedido-form.html'));
+app.get('/dashboard', requireAuth('admin'), view('dashboard.html'));
+app.get('/inicio', requireAuth('operador'), view('inicio.html'));
+app.get('/clientes', requireAuth(), view('clientes.html'));
+app.get('/clientes/nuevo', requireAuth(), view('cliente-form.html'));
+app.get('/clientes/:id', requireAuth(), view('cliente-ficha.html'));
+app.get('/pedidos/nuevo', requireAuth(), view('pedido-form.html'));
 
 // ── API de negocio ────────────────────────────────────────────────
 
-app.use('/api/clientes', requireLogin, clientesRouter);
-app.use('/api/pedidos', requireLogin, pedidosRouter);
+app.use('/api/clientes', requireAuth(), clientesRouter);
+app.use('/api/pedidos', requireAuth(), pedidosRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'No encontrado' });
 });
 
-// ── Error handler global (captura errores de rutas async) ─────────
+// ── Error handler global ──────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error(err.stack || err.message);
@@ -151,7 +166,7 @@ app.use((err, req, res, next) => {
 });
 
 // Cuando se ejecuta directamente (`node server.js`) levanta el servidor HTTP.
-// Cuando Vercel lo importa como módulo serverless, solo exporta el app sin escuchar.
+// Cuando Vercel lo importa como módulo serverless, solo exporta el app.
 if (require.main === module) {
   app.listen(config.PORT, () => {
     console.log(`Närma CRM corriendo en http://localhost:${config.PORT}`);

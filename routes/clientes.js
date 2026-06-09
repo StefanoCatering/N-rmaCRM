@@ -10,7 +10,7 @@ const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro']
 const ESTADOS = ['activo', 'pausado', 'inactivo', 'baja'];
 
 function requireAdmin(req, res, next) {
-  if (req.session.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
+  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
   next();
 }
 
