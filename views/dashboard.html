@@ -134,7 +134,9 @@
                   <td><strong>${c.dias_sin_pedir}</strong> días</td>
                   <td>${c.seguimiento_marcado
                     ? `<button class="btn-secondary btn-seguimiento" disabled>Seguimiento marcado ✓ (${fmtFecha(c.seguimiento_fecha)})</button>`
-                    : `<button class="btn-secondary btn-seguimiento" data-id="${c.id}">Marcar seguimiento</button>`
+                    : CURRENT_USER.rol === 'visor'
+                      ? `<span style="color:rgba(240,235,231,0.35);font-size:12px;">Pendiente</span>`
+                      : `<button class="btn-secondary btn-seguimiento" data-id="${c.id}">Marcar seguimiento</button>`
                   }</td>
                 </tr>
               `).join('')}

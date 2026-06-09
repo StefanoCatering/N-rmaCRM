@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   id            SERIAL PRIMARY KEY,
   username      TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  rol           TEXT NOT NULL CHECK (rol IN ('operador','admin')),
+  rol           TEXT NOT NULL CHECK (rol IN ('operador','admin','visor')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

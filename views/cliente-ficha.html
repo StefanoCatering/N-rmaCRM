@@ -72,6 +72,7 @@
     function renderFicha(c, pedidos, colaboradores) {
       const enAlerta = c.dias_sin_pedir !== null && c.dias_sin_pedir > window.ALERT_DAYS;
       const esAdmin = CURRENT_USER.rol === 'admin';
+      const puedeEscribir = CURRENT_USER.rol !== 'visor';
 
       document.getElementById('ficha-cont').innerHTML = `
         <div class="cliente-header-card">
@@ -148,7 +149,7 @@
               <div class="metric-value">${c.dias_sin_pedir !== null ? c.dias_sin_pedir : '—'}</div>
             </div>
           </div>
-          <a href="/pedidos/nuevo?cliente_id=${c.id}" class="btn-primary">+ Registrar nuevo pedido</a>
+          ${puedeEscribir ? `<a href="/pedidos/nuevo?cliente_id=${c.id}" class="btn-primary">+ Registrar nuevo pedido</a>` : ''}
         </div>
 
         <div class="card">

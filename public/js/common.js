@@ -74,7 +74,7 @@ function renderNav(activeHref) {
   if (!cont || !CURRENT_USER) return;
 
   const links = [];
-  if (CURRENT_USER.rol === 'admin') {
+  if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor') {
     links.push(['/dashboard', 'Dashboard']);
   } else {
     links.push(['/inicio', 'Inicio']);

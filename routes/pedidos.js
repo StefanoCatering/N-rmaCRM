@@ -8,8 +8,13 @@ const MEDIOS_PAGO = ['efectivo', 'transferencia', 'tarjeta', 'pos'];
 const ESTADOS_PAGO = ['pagado', 'pendiente'];
 const TIPOS_VIANDA = ['economico', 'saludable', 'low_carb'];
 
-// POST /api/pedidos — registrar nuevo pedido (operador y admin)
-router.post('/', async (req, res, next) => {
+function requireEscritura(req, res, next) {
+  if (req.user.rol === 'visor') return res.status(403).json({ error: 'Acceso de solo lectura' });
+  next();
+}
+
+// POST /api/pedidos — registrar nuevo pedido (admin y operador; visor no puede)
+router.post('/', requireEscritura, async (req, res, next) => {
   try {
     const body = req.body || {};
     const errores = [];

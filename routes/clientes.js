@@ -9,8 +9,23 @@ const SEGMENTOS = ['particular', 'empresa'];
 const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 const ESTADOS = ['activo', 'pausado', 'inactivo', 'baja'];
 
+// Admin y visor pueden ver datos de dashboard (KPIs, alertas)
+function requireAdminOrVisor(req, res, next) {
+  if (req.user.rol !== 'admin' && req.user.rol !== 'visor') {
+    return res.status(403).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// Solo admin puede modificar estado/seguimiento
 function requireAdmin(req, res, next) {
   if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
+  next();
+}
+
+// Visor es solo lectura — no puede crear ni editar clientes/pedidos
+function requireEscritura(req, res, next) {
+  if (req.user.rol === 'visor') return res.status(403).json({ error: 'Acceso de solo lectura' });
   next();
 }
 
@@ -75,15 +90,15 @@ router.get('/empresas', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/clientes/alertas — clientes sin pedido reciente (solo admin)
-router.get('/alertas', requireAdmin, async (req, res, next) => {
+// GET /api/clientes/alertas — clientes sin pedido reciente (admin y visor)
+router.get('/alertas', requireAdminOrVisor, async (req, res, next) => {
   try {
     res.json({ alertDays: ALERT_DAYS, alertas: await clientes.listAlertas() });
   } catch (err) { next(err); }
 });
 
-// GET /api/clientes/kpis — KPIs del dashboard (solo admin)
-router.get('/kpis', requireAdmin, async (req, res, next) => {
+// GET /api/clientes/kpis — KPIs del dashboard (admin y visor)
+router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
   try {
     const [
       total_activos,
@@ -128,8 +143,8 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/clientes — crear cliente nuevo (operador y admin)
-router.post('/', async (req, res, next) => {
+// POST /api/clientes — crear cliente nuevo (admin y operador; visor no puede)
+router.post('/', requireEscritura, async (req, res, next) => {
   try {
     const { data, errores } = validarCliente(req.body || {});
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
@@ -143,8 +158,8 @@ router.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PUT /api/clientes/:id — editar datos básicos (operador y admin)
-router.put('/:id', async (req, res, next) => {
+// PUT /api/clientes/:id — editar datos básicos (admin y operador; visor no puede)
+router.put('/:id', requireEscritura, async (req, res, next) => {
   try {
     const cliente = await clientes.getById(req.params.id);
     if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });

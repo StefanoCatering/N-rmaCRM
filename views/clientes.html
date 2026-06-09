@@ -17,7 +17,7 @@
           <div class="view-header-title">clientes</div>
           <div class="view-header-sub" id="resultado-count"></div>
         </div>
-        <a href="/clientes/nuevo" class="btn-primary">+ Nuevo cliente</a>
+        <a href="/clientes/nuevo" class="btn-primary" id="btn-nuevo-cliente">+ Nuevo cliente</a>
       </div>
 
       <div class="card">
@@ -60,6 +60,10 @@
     (async function () {
       await ensureSession();
       renderNav('/clientes');
+      if (CURRENT_USER.rol === 'visor') {
+        const btn = document.getElementById('btn-nuevo-cliente');
+        if (btn) btn.style.display = 'none';
+      }
       await cargarEmpresas();
 
       const params = new URLSearchParams(window.location.search);

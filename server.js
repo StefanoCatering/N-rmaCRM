@@ -57,8 +57,10 @@ function requireAuth(rol) {
         '| path:', req.originalUrl
       );
 
-      if (rol && req.user.rol !== rol) {
-        console.log('[requireAuth] FORBIDDEN | user.rol:', req.user.rol, '!= requerido:', rol);
+      // rol puede ser string ('admin'), array (['admin','visor']), o falsy (cualquiera)
+      const rolesPermitidos = Array.isArray(rol) ? rol : (rol ? [rol] : null);
+      if (rolesPermitidos && !rolesPermitidos.includes(req.user.rol)) {
+        console.log('[requireAuth] FORBIDDEN | user.rol:', req.user.rol, '| permitidos:', rolesPermitidos);
         if (isApi) return res.status(403).json({ error: 'No autorizado' });
         return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
       }
@@ -102,7 +104,7 @@ app.post('/api/login', async (req, res, next) => {
       maxAge: 8 * 60 * 60 * 1000, // 8 horas
     });
 
-    const dest = usuario.rol === 'admin' ? '/dashboard' : '/inicio';
+    const dest = (usuario.rol === 'admin' || usuario.rol === 'visor') ? '/dashboard' : '/inicio';
     console.log('[login] JWT generado | user:', usuario.username, '| rol:', usuario.rol, '| redirect ->', dest);
     res.redirect(dest);
   } catch (err) { next(err); }
@@ -124,7 +126,7 @@ app.get('/', (req, res) => {
   if (!token) return res.redirect('/login');
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    return res.redirect(payload.rol === 'admin' ? '/dashboard' : '/inicio');
+    return res.redirect((payload.rol === 'admin' || payload.rol === 'visor') ? '/dashboard' : '/inicio');
   } catch {
     res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
     return res.redirect('/login');
@@ -136,18 +138,18 @@ app.get('/login', (req, res) => {
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
-      return res.redirect(payload.rol === 'admin' ? '/dashboard' : '/inicio');
+      return res.redirect((payload.rol === 'admin' || payload.rol === 'visor') ? '/dashboard' : '/inicio');
     } catch { /* token inválido → mostrar login */ }
   }
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
-app.get('/dashboard', requireAuth('admin'), view('dashboard.html'));
+app.get('/dashboard', requireAuth(['admin', 'visor']), view('dashboard.html'));
 app.get('/inicio', requireAuth('operador'), view('inicio.html'));
 app.get('/clientes', requireAuth(), view('clientes.html'));
-app.get('/clientes/nuevo', requireAuth(), view('cliente-form.html'));
+app.get('/clientes/nuevo', requireAuth(['admin', 'operador']), view('cliente-form.html'));
 app.get('/clientes/:id', requireAuth(), view('cliente-ficha.html'));
-app.get('/pedidos/nuevo', requireAuth(), view('pedido-form.html'));
+app.get('/pedidos/nuevo', requireAuth(['admin', 'operador']), view('pedido-form.html'));
 
 // ── API de negocio ────────────────────────────────────────────────
 

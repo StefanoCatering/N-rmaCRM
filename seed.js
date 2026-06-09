@@ -19,6 +19,40 @@ function daysAgo(n) {
   return isoDate(d);
 }
 
+// ── Migración de schema ───────────────────────────────────────────
+// Amplía el CHECK constraint de usuarios.rol para incluir el rol 'visor'.
+// Es idempotente: si el constraint ya incluye 'visor', no hace nada.
+
+async function migrateSchema() {
+  await pool.query(`
+    DO $$
+    DECLARE c record;
+    BEGIN
+      -- Dropear cualquier CHECK constraint sobre rol que no incluya 'visor'
+      FOR c IN
+        SELECT conname FROM pg_constraint
+        WHERE conrelid = 'usuarios'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%rol%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%visor%'
+      LOOP
+        EXECUTE format('ALTER TABLE usuarios DROP CONSTRAINT %I', c.conname);
+      END LOOP;
+      -- Agregar el nuevo constraint con visor si todavía no existe
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'usuarios'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%visor%'
+      ) THEN
+        ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check
+          CHECK (rol IN ('operador', 'admin', 'visor'));
+      END IF;
+    END $$
+  `);
+  console.log('  schema migrado: usuarios.rol incluye visor');
+}
+
 // ── Usuarios ──────────────────────────────────────────────────────
 
 async function seedUsuarios() {
@@ -26,6 +60,7 @@ async function seedUsuarios() {
     { username: 'NarmaAdmin', password: 'narma2025', rol: 'operador' },
     { username: 'Stefano',    password: 'narma2025', rol: 'admin'    },
     { username: 'Guadalupe',  password: 'narma2025', rol: 'admin'    },
+    { username: 'Direccion',  password: 'narma2025', rol: 'visor'    },
   ];
 
   for (const u of usuarios) {
@@ -185,6 +220,8 @@ async function seedClientes() {
 
 async function main() {
   try {
+    console.log('Migrando schema...');
+    await migrateSchema();
     console.log('Sembrando usuarios...');
     await seedUsuarios();
     console.log('Sembrando clientes y pedidos...');
