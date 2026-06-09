@@ -89,16 +89,17 @@ app.post('/api/login', async (req, res, next) => {
     req.session.user = { id: usuario.id, username: usuario.username, rol: usuario.rol };
 
     // Guardar sesión explícitamente antes de responder.
-    // En entornos serverless (Vercel) el proceso puede congelarse antes de que
-    // el callback asíncrono de express-session complete — sin este save() la
-    // sesión nunca se escribe en Supabase y el Set-Cookie no llega al cliente.
+    // Responder con HTTP 302 (no JSON) — el Set-Cookie viaja en la respuesta
+    // del redirect, de modo que el browser lo almacena antes de seguir la
+    // navegación y no hay condición de carrera entre JS y la cookie.
     req.session.save((err) => {
       if (err) {
         console.error('[login] ERROR guardando sesión:', err.message);
         return next(err);
       }
-      console.log('[login] sesión guardada OK — sid:', req.sessionID, '| user:', username, '| rol:', usuario.rol);
-      res.json({ ok: true, user: req.session.user });
+      const dest = usuario.rol === 'admin' ? '/dashboard' : '/inicio';
+      console.log('[login] sesión guardada OK — sid:', req.sessionID, '| user:', username, '| rol:', usuario.rol, '| redirect ->', dest);
+      res.redirect(dest);
     });
   } catch (err) { next(err); }
 });

@@ -56,10 +56,21 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
+          credentials: 'include',
         });
+
+        // El servidor responde con 302 en caso de éxito.
+        // fetch sigue el redirect automáticamente y expone res.redirected = true.
+        // El Set-Cookie viaja en la respuesta 302 → el browser lo almacena
+        // antes de que este código continúe → no hay condición de carrera.
+        if (res.redirected) {
+          window.location.href = res.url;
+          return;
+        }
+
+        // En caso de error (401, 400, 500) el servidor responde con JSON.
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Error al iniciar sesión');
-        window.location.href = data.user.rol === 'admin' ? '/dashboard' : '/inicio';
+        throw new Error(data.error || 'Error al iniciar sesión');
       } catch (e) {
         errorBox.textContent = e.message;
         errorBox.style.display = 'block';
