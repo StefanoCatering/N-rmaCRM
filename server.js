@@ -12,12 +12,18 @@ const pedidosRouter = require('./routes/pedidos');
 
 const app = express();
 
+// ── Diagnóstico de arranque ───────────────────────────────────────
+console.log('[server] NODE_ENV:', config.NODE_ENV);
+console.log('[server] SESSION_SECRET configurado:', !!config.SESSION_SECRET);
+console.log('[server] session store: connect-pg-simple (PostgreSQL / Supabase)');
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Vercel corre detrás de un reverse proxy — sin esto Express no confía en los
 // headers X-Forwarded-* y las cookies con secure:true no se envían correctamente.
+// DEBE estar antes de app.use(session(...)).
 app.set('trust proxy', 1);
 
 app.use(session({
@@ -42,6 +48,7 @@ app.use(session({
 // ── Middlewares de autenticación / autorización ──────────────────
 
 function requireLogin(req, res, next) {
+  console.log('[requireLogin] path:', req.path, '| sid:', req.sessionID, '| user:', JSON.stringify(req.session.user ?? null));
   if (req.session.user) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'No autenticado' });
   return res.redirect('/login');
@@ -49,6 +56,7 @@ function requireLogin(req, res, next) {
 
 function requireRole(rol) {
   return (req, res, next) => {
+    console.log('[requireRole:' + rol + '] path:', req.path, '| sid:', req.sessionID, '| user:', JSON.stringify(req.session.user ?? null));
     if (!req.session.user) {
       if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'No autenticado' });
       return res.redirect('/login');
@@ -77,8 +85,21 @@ app.post('/api/login', async (req, res, next) => {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
 
+    console.log('[login] autenticado:', username, '| sid antes de save:', req.sessionID);
     req.session.user = { id: usuario.id, username: usuario.username, rol: usuario.rol };
-    res.json({ ok: true, user: req.session.user });
+
+    // Guardar sesión explícitamente antes de responder.
+    // En entornos serverless (Vercel) el proceso puede congelarse antes de que
+    // el callback asíncrono de express-session complete — sin este save() la
+    // sesión nunca se escribe en Supabase y el Set-Cookie no llega al cliente.
+    req.session.save((err) => {
+      if (err) {
+        console.error('[login] ERROR guardando sesión:', err.message);
+        return next(err);
+      }
+      console.log('[login] sesión guardada OK — sid:', req.sessionID, '| user:', username, '| rol:', usuario.rol);
+      res.json({ ok: true, user: req.session.user });
+    });
   } catch (err) { next(err); }
 });
 
