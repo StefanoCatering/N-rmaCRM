@@ -221,11 +221,10 @@ async function evolucionActivosPorMes(meses = 6) {
   for (let i = meses - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const yearMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    // 'YYYY-MM-31' funciona como fecha "fin de mes aproximado" para comparación:
-    // Postgres la interpreta como DATE y maneja desbordamiento de días correctamente
-    // (p.ej. 2026-02-31 → 2026-03-03), pero como solo usamos "≤ fin_de_mes" para
-    // capturar todo el mes, la comparación es correcta en todos los casos.
-    const finDeMes = `${yearMonth}-31`;
+    // Último día real del mes: new Date(año, mes+1, 0) da el día 0 del mes siguiente
+    // = último día del mes actual. Evita fechas inválidas como '2026-02-31' que
+    // Postgres rechaza con error (a diferencia de SQLite que las hacía overflow).
+    const finDeMes = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
     const r = await pool.query(`
       SELECT COUNT(*)::integer AS n FROM clientes
       WHERE fecha_ingreso <= $1::date
