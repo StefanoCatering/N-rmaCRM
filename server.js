@@ -7,7 +7,8 @@ const bcrypt = require('bcrypt');
 const config = require('./config');       // también llama a dotenv.config()
 const usuarios = require('./models/usuarios');
 const clientesRouter = require('./routes/clientes');
-const pedidosRouter = require('./routes/pedidos');
+const pedidosRouter  = require('./routes/pedidos');
+const exportRouter   = require('./routes/export');
 
 // Validación de arranque: JWT_SECRET es obligatorio
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -154,7 +155,8 @@ app.get('/pedidos/nuevo', requireAuth(['admin', 'operador']), view('pedido-form.
 // ── API de negocio ────────────────────────────────────────────────
 
 app.use('/api/clientes', requireAuth(), clientesRouter);
-app.use('/api/pedidos', requireAuth(), pedidosRouter);
+app.use('/api/pedidos',  requireAuth(), pedidosRouter);
+app.use('/api/export',   requireAuth(), exportRouter);
 
 app.use((req, res) => {
   res.status(404).json({ error: 'No encontrado' });

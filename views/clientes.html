@@ -48,7 +48,34 @@
             <option value="">Todas las empresas</option>
           </select>
         </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <button class="btn-secondary" id="btn-exportar-datos" style="font-size:12px;">↓ Exportar datos</button>
+          <button class="btn-secondary" id="btn-exportar-historial" style="font-size:12px;">↓ Exportar con historial</button>
+        </div>
+
         <div id="tabla-cont"><div class="empty-state">Cargando...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: exportar con historial (rango de fechas) -->
+  <div id="modal-export" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:380px;width:100%;">
+      <div class="card-title">exportar con historial</div>
+      <div style="color:rgba(240,235,231,0.55);font-size:12px;margin-bottom:12px;">
+        Filtrá los pedidos por período. Dejá en blanco para incluir todos.
+      </div>
+      <div class="form-group">
+        <label class="form-label">Desde (opcional)</label>
+        <input type="date" id="exp-fecha-desde" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.07);border:1px solid rgba(240,235,231,0.2);border-radius:6px;padding:8px 10px;color:var(--cream);font-size:14px;"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hasta (opcional)</label>
+        <input type="date" id="exp-fecha-hasta" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.07);border:1px solid rgba(240,235,231,0.2);border-radius:6px;padding:8px 10px;color:var(--cream);font-size:14px;"/>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-exp-confirmar">Exportar →</button>
+        <button class="btn-secondary" id="btn-exp-cancelar">Cancelar</button>
       </div>
     </div>
   </div>
@@ -79,6 +106,34 @@
         clearTimeout(timerBuscar);
         timerBuscar = setTimeout(cargarClientes, 300);
       });
+
+      // ── Exportación ──────────────────────────────────────────
+      document.getElementById('btn-exportar-datos').addEventListener('click', () => {
+        descargarExport('datos');
+      });
+
+      document.getElementById('btn-exportar-historial').addEventListener('click', () => {
+        // Limpiar fechas del modal y abrirlo
+        document.getElementById('exp-fecha-desde').value = '';
+        document.getElementById('exp-fecha-hasta').value  = '';
+        document.getElementById('modal-export').classList.remove('hidden');
+      });
+
+      document.getElementById('btn-exp-cancelar').addEventListener('click', () => {
+        document.getElementById('modal-export').classList.add('hidden');
+      });
+
+      document.getElementById('btn-exp-confirmar').addEventListener('click', () => {
+        const desde = document.getElementById('exp-fecha-desde').value;
+        const hasta  = document.getElementById('exp-fecha-hasta').value;
+        document.getElementById('modal-export').classList.add('hidden');
+        descargarExport('historial', { fecha_desde: desde, fecha_hasta: hasta });
+      });
+
+      // Cerrar modal al hacer click fuera
+      document.getElementById('modal-export').addEventListener('click', function (e) {
+        if (e.target === this) this.classList.add('hidden');
+      });
     })();
 
     async function cargarEmpresas() {
@@ -107,6 +162,36 @@
 
       const { clientes } = await api('/api/clientes?' + params.toString());
       renderTabla(clientes);
+    }
+
+    // ── Helpers de exportación ──────────────────────────────────
+
+    function construirParamsExport(tipo, opciones = {}) {
+      const params = new URLSearchParams();
+      params.set('tipo', tipo);
+      const q       = document.getElementById('f-buscar').value.trim();
+      const estado  = document.getElementById('f-estado').value;
+      const segmento = document.getElementById('f-segmento').value;
+      const canal   = document.getElementById('f-canal').value;
+      const empresa = document.getElementById('f-empresa').value;
+      if (q)        params.set('q', q);
+      if (estado)   params.set('estado', estado);
+      if (segmento) params.set('segmento', segmento);
+      if (canal)    params.set('canal_origen', canal);
+      if (empresa)  params.set('empresa', empresa);
+      if (opciones.fecha_desde) params.set('fecha_desde', opciones.fecha_desde);
+      if (opciones.fecha_hasta)  params.set('fecha_hasta',  opciones.fecha_hasta);
+      return params.toString();
+    }
+
+    function descargarExport(tipo, opciones = {}) {
+      const qs = construirParamsExport(tipo, opciones);
+      // Crear un <a> temporal para disparar la descarga sin navegar fuera de la página
+      const a = document.createElement('a');
+      a.href = '/api/export?' + qs;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
 
     function renderTabla(clientes) {
