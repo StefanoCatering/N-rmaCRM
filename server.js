@@ -16,10 +16,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Vercel corre detrás de un reverse proxy — sin esto Express no confía en los
+// headers X-Forwarded-* y las cookies con secure:true no se envían correctamente.
+app.set('trust proxy', 1);
+
 app.use(session({
   // Sesiones persistidas en Supabase (PostgreSQL) — necesario para Vercel
   // serverless donde el MemoryStore se descarta entre invocaciones frías.
-  // createTableIfMissing crea la tabla "session" automáticamente si no existe.
   store: new pgSession({
     pool,
     tableName: 'session',
@@ -30,7 +33,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: config.NODE_ENV === 'production',
+    secure: true,      // requerido para cookies en HTTPS (Vercel siempre es HTTPS)
+    sameSite: 'none',  // requerido cuando secure:true en contexto cross-site de Vercel
     maxAge: 8 * 60 * 60 * 1000, // 8 horas
   },
 }));
