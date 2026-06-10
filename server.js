@@ -149,8 +149,10 @@ app.get('/dashboard', requireAuth(['admin', 'visor']), view('dashboard.html'));
 app.get('/inicio', requireAuth('operador'), view('inicio.html'));
 app.get('/clientes', requireAuth(), view('clientes.html'));
 app.get('/clientes/nuevo', requireAuth(['admin', 'operador']), view('cliente-form.html'));
+app.get('/clientes/:id/editar', requireAuth(['admin', 'operador']), view('cliente-form.html'));
 app.get('/clientes/:id', requireAuth(), view('cliente-ficha.html'));
 app.get('/pedidos/nuevo', requireAuth(['admin', 'operador']), view('pedido-form.html'));
+app.get('/pedidos', requireAuth(['admin', 'operador']), view('pedidos.html'));
 
 // ── API de negocio ────────────────────────────────────────────────
 

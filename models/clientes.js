@@ -39,9 +39,9 @@ async function list({ estado, segmento, canal_origen, empresa, q } = {}) {
   if (empresa)     { where.push(`c.empresa = $${idx++}`);     params.push(empresa); }
   if (q) {
     // ILIKE en lugar de LIKE para búsqueda case-insensitive (Postgres LIKE es case-sensitive)
-    where.push(`(c.nombre_completo ILIKE $${idx} OR c.cedula ILIKE $${idx + 1})`);
-    idx += 2;
-    params.push(`%${q}%`, `%${q}%`);
+    where.push(`(c.nombre_completo ILIKE $${idx} OR c.cedula ILIKE $${idx + 1} OR c.telefono ILIKE $${idx + 2} OR c.telefono2 ILIKE $${idx + 3} OR c.telefono3 ILIKE $${idx + 4})`);
+    idx += 5;
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
 
   const sql = SELECT_BASE
@@ -68,20 +68,23 @@ async function existsCedula(cedula, excludeId = null) {
 async function create(data) {
   const result = await pool.query(`
     INSERT INTO clientes
-      (nombre_completo, cedula, email, telefono, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      (nombre_completo, cedula, email, telefono, telefono2, telefono3, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso, observaciones)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING id
   `, [
     data.nombre_completo,
     data.cedula,
     data.email || null,
     data.telefono || null,
+    data.telefono2 || null,
+    data.telefono3 || null,
     data.segmento,
     data.segmento === 'empresa' ? (data.empresa || null) : null,
     data.canal_origen,
     data.canal_origen === 'embajador' ? (data.codigo_embajador || null) : null,
     data.estado || 'activo',
     data.fecha_ingreso,
+    data.observaciones || null,
   ]);
   return getById(result.rows[0].id);
 }
@@ -93,23 +96,29 @@ async function update(id, data) {
       cedula           = $2,
       email            = $3,
       telefono         = $4,
-      segmento         = $5,
-      empresa          = $6,
-      canal_origen     = $7,
-      codigo_embajador = $8,
-      fecha_ingreso    = $9,
+      telefono2        = $5,
+      telefono3        = $6,
+      segmento         = $7,
+      empresa          = $8,
+      canal_origen     = $9,
+      codigo_embajador = $10,
+      fecha_ingreso    = $11,
+      observaciones    = $12,
       updated_at       = NOW()
-    WHERE id = $10
+    WHERE id = $13
   `, [
     data.nombre_completo,
     data.cedula,
     data.email || null,
     data.telefono || null,
+    data.telefono2 || null,
+    data.telefono3 || null,
     data.segmento,
     data.segmento === 'empresa' ? (data.empresa || null) : null,
     data.canal_origen,
     data.canal_origen === 'embajador' ? (data.codigo_embajador || null) : null,
     data.fecha_ingreso,
+    data.observaciones || null,
     id,
   ]);
   return getById(id);

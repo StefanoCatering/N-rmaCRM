@@ -1,6 +1,7 @@
 const express = require('express');
 const clientes = require('../models/clientes');
 const pedidos = require('../models/pedidos');
+const ubicaciones = require('../models/ubicaciones');
 const { ALERT_DAYS } = require('../config');
 
 const router = express.Router();
@@ -56,6 +57,9 @@ function validarCliente(body, { partial = false } = {}) {
 
   data.email = body.email ? String(body.email).trim() : null;
   data.telefono = body.telefono ? String(body.telefono).trim() : null;
+  data.telefono2 = body.telefono2 ? String(body.telefono2).trim() : null;
+  data.telefono3 = body.telefono3 ? String(body.telefono3).trim() : null;
+  data.observaciones = body.observaciones ? String(body.observaciones).trim().slice(0, 500) : null;
   data.codigo_embajador = body.codigo_embajador ? String(body.codigo_embajador).trim() : null;
   data.empresa = body.empresa ? String(body.empresa).trim() : null;
 
@@ -67,6 +71,19 @@ function validarCliente(body, { partial = false } = {}) {
   }
 
   return { data, errores };
+}
+
+// Hasta 3 ubicaciones de entrega; descarta las que vienen completamente vacías.
+function parseUbicaciones(body) {
+  const raw = Array.isArray(body.ubicaciones) ? body.ubicaciones : [];
+  return raw
+    .slice(0, 3)
+    .map(u => ({
+      direccion: u && u.direccion ? String(u.direccion).trim() : '',
+      zona: u && u.zona ? String(u.zona).trim() : '',
+      referencia: u && u.referencia ? String(u.referencia).trim() : '',
+    }))
+    .filter(u => u.direccion || u.zona || u.referencia);
 }
 
 // GET /api/clientes — listado con filtros y búsqueda
@@ -135,10 +152,12 @@ router.get('/:id', async (req, res, next) => {
   try {
     const cliente = await clientes.getById(req.params.id);
     if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
-    const [colaboradores, historialPedidos] = await Promise.all([
+    const [colaboradores, historialPedidos, ubicacionesCliente] = await Promise.all([
       cliente.empresa ? clientes.listColaboradores(cliente.empresa, cliente.id) : Promise.resolve([]),
       pedidos.listByCliente(cliente.id),
+      ubicaciones.listByCliente(cliente.id),
     ]);
+    cliente.ubicaciones = ubicacionesCliente;
     res.json({ cliente, pedidos: historialPedidos, colaboradores });
   } catch (err) { next(err); }
 });
@@ -154,6 +173,9 @@ router.post('/', requireEscritura, async (req, res, next) => {
     }
 
     const cliente = await clientes.create(data);
+    const ubicacionesCliente = parseUbicaciones(req.body || {});
+    if (ubicacionesCliente.length) await ubicaciones.replaceForCliente(cliente.id, ubicacionesCliente);
+    cliente.ubicaciones = await ubicaciones.listByCliente(cliente.id);
     res.status(201).json({ cliente });
   } catch (err) { next(err); }
 });
@@ -172,6 +194,8 @@ router.put('/:id', requireEscritura, async (req, res, next) => {
     }
 
     const actualizado = await clientes.update(cliente.id, data);
+    await ubicaciones.replaceForCliente(cliente.id, parseUbicaciones(req.body || {}));
+    actualizado.ubicaciones = await ubicaciones.listByCliente(cliente.id);
     res.json({ cliente: actualizado });
   } catch (err) { next(err); }
 });

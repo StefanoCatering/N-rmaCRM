@@ -76,10 +76,11 @@ function renderNav(activeHref) {
   const links = [];
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor') {
     links.push(['/dashboard', 'Dashboard']);
-  } else {
-    links.push(['/inicio', 'Inicio']);
   }
   links.push(['/clientes', 'Clientes']);
+  if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'operador') {
+    links.push(['/pedidos', 'Pedidos']);
+  }
 
   const linksHtml = links.map(([href, label]) => {
     const active = href === activeHref ? ' active' : '';

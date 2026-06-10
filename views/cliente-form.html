@@ -40,9 +40,23 @@
             <input type="email" id="f-email" placeholder="correo@ejemplo.com"/>
           </div>
           <div class="form-group">
-            <label class="form-label">Teléfono</label>
+            <label class="form-label">Teléfono 1</label>
             <input type="tel" id="f-telefono" placeholder="09xx xxxxxx"/>
           </div>
+        </div>
+
+        <div id="telefono-2" class="form-group hidden">
+          <label class="form-label">Teléfono 2</label>
+          <input type="tel" id="f-telefono2" placeholder="09xx xxxxxx"/>
+        </div>
+
+        <div id="telefono-3" class="form-group hidden">
+          <label class="form-label">Teléfono 3</label>
+          <input type="tel" id="f-telefono3" placeholder="09xx xxxxxx"/>
+        </div>
+
+        <div class="form-group">
+          <button type="button" class="btn-secondary" id="btn-agregar-telefono">+ Agregar teléfono</button>
         </div>
 
         <div class="form-row">
@@ -85,6 +99,70 @@
           <input type="date" id="f-fecha-ingreso"/>
         </div>
 
+        <div class="form-group">
+          <label class="form-label">Ubicaciones de entrega</label>
+        </div>
+
+        <div id="ubicacion-1" class="ubicacion-block">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Dirección</label>
+              <input type="text" id="f-ubic1-direccion" placeholder="Ej: Av. Mcal. López 1234"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Zona</label>
+              <input type="text" id="f-ubic1-zona" placeholder="Ej: Villa Morra"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Referencia</label>
+            <input type="text" id="f-ubic1-referencia" placeholder="Ej: Portón negro, casa esquinera"/>
+          </div>
+        </div>
+
+        <div id="ubicacion-2" class="ubicacion-block hidden">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Dirección</label>
+              <input type="text" id="f-ubic2-direccion" placeholder="Ej: Av. Mcal. López 1234"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Zona</label>
+              <input type="text" id="f-ubic2-zona" placeholder="Ej: Villa Morra"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Referencia</label>
+            <input type="text" id="f-ubic2-referencia" placeholder="Ej: Portón negro, casa esquinera"/>
+          </div>
+        </div>
+
+        <div id="ubicacion-3" class="ubicacion-block hidden">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Dirección</label>
+              <input type="text" id="f-ubic3-direccion" placeholder="Ej: Av. Mcal. López 1234"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Zona</label>
+              <input type="text" id="f-ubic3-zona" placeholder="Ej: Villa Morra"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Referencia</label>
+            <input type="text" id="f-ubic3-referencia" placeholder="Ej: Portón negro, casa esquinera"/>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <button type="button" class="btn-secondary" id="btn-agregar-ubicacion">+ Agregar ubicación</button>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Observaciones</label>
+          <textarea id="f-observaciones" maxlength="500" rows="3" placeholder="Ej: alérgico a frutos secos, prefiere sin sal..."></textarea>
+        </div>
+
         <div class="btn-row">
           <button class="btn-primary" id="btn-guardar">Guardar cliente</button>
           <a href="/clientes" class="btn-secondary">Cancelar</a>
@@ -95,6 +173,31 @@
 
   <script src="/js/common.js"></script>
   <script>
+    // Detecta modo edición: /clientes/:id/editar
+    const matchEditar = window.location.pathname.match(/^\/clientes\/(\d+)\/editar$/);
+    const esEdicion = !!matchEditar;
+    const clienteIdEditar = esEdicion ? matchEditar[1] : null;
+
+    let ubicacionesVisibles = 1;
+
+    function mostrarSiguienteUbicacion() {
+      ubicacionesVisibles++;
+      document.getElementById(`ubicacion-${ubicacionesVisibles}`).classList.remove('hidden');
+      if (ubicacionesVisibles >= 3) {
+        document.getElementById('btn-agregar-ubicacion').classList.add('hidden');
+      }
+    }
+
+    let telefonosVisibles = 1;
+
+    function mostrarSiguienteTelefono() {
+      telefonosVisibles++;
+      document.getElementById(`telefono-${telefonosVisibles}`).classList.remove('hidden');
+      if (telefonosVisibles >= 3) {
+        document.getElementById('btn-agregar-telefono').classList.add('hidden');
+      }
+    }
+
     (async function () {
       await ensureSession();
       renderNav('/clientes');
@@ -118,8 +221,72 @@
       selSegmento.addEventListener('change', actualizarEmpresa);
       actualizarEmpresa();
 
+      document.getElementById('btn-agregar-ubicacion').addEventListener('click', mostrarSiguienteUbicacion);
+      document.getElementById('btn-agregar-telefono').addEventListener('click', mostrarSiguienteTelefono);
       document.getElementById('btn-guardar').addEventListener('click', guardar);
+
+      if (esEdicion) {
+        document.title = 'närma · crm · editar cliente';
+        document.querySelector('.view-header-title').textContent = 'editar cliente';
+        document.querySelector('.view-header-sub').textContent = 'Modificá los datos del cliente';
+        document.getElementById('btn-guardar').textContent = 'Guardar cambios';
+        await cargarCliente();
+      }
     })();
+
+    async function cargarCliente() {
+      const errorBox = document.getElementById('form-error');
+      try {
+        const { cliente } = await api(`/api/clientes/${clienteIdEditar}`);
+
+        document.getElementById('f-nombre').value = cliente.nombre_completo || '';
+        document.getElementById('f-cedula').value = cliente.cedula || '';
+        document.getElementById('f-email').value = cliente.email || '';
+        document.getElementById('f-telefono').value = cliente.telefono || '';
+        if (cliente.telefono2) {
+          if (telefonosVisibles < 2) mostrarSiguienteTelefono();
+          document.getElementById('f-telefono2').value = cliente.telefono2;
+        }
+        if (cliente.telefono3) {
+          if (telefonosVisibles < 3) mostrarSiguienteTelefono();
+          document.getElementById('f-telefono3').value = cliente.telefono3;
+        }
+        document.getElementById('f-segmento').value = cliente.segmento || 'particular';
+        document.getElementById('f-empresa').value = cliente.empresa || '';
+        document.getElementById('f-canal').value = cliente.canal_origen || 'whatsapp';
+        document.getElementById('f-codigo-embajador').value = cliente.codigo_embajador || '';
+        document.getElementById('f-fecha-ingreso').value = cliente.fecha_ingreso ? String(cliente.fecha_ingreso).slice(0, 10) : '';
+        document.getElementById('f-observaciones').value = cliente.observaciones || '';
+
+        document.getElementById('grupo-empresa').classList.toggle('hidden', cliente.segmento !== 'empresa');
+        document.getElementById('grupo-embajador').classList.toggle('hidden', cliente.canal_origen !== 'embajador');
+
+        const ubicaciones = cliente.ubicaciones || [];
+        ubicaciones.forEach((u, i) => {
+          const n = i + 1;
+          if (n > 3) return;
+          if (n > ubicacionesVisibles) mostrarSiguienteUbicacion();
+          document.getElementById(`f-ubic${n}-direccion`).value = u.direccion || '';
+          document.getElementById(`f-ubic${n}-zona`).value = u.zona || '';
+          document.getElementById(`f-ubic${n}-referencia`).value = u.referencia || '';
+        });
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      }
+    }
+
+    function recolectarUbicaciones() {
+      const ubicaciones = [];
+      for (let n = 1; n <= ubicacionesVisibles; n++) {
+        ubicaciones.push({
+          direccion: document.getElementById(`f-ubic${n}-direccion`).value.trim(),
+          zona: document.getElementById(`f-ubic${n}-zona`).value.trim(),
+          referencia: document.getElementById(`f-ubic${n}-referencia`).value.trim(),
+        });
+      }
+      return ubicaciones;
+    }
 
     async function guardar() {
       const errorBox = document.getElementById('form-error');
@@ -130,24 +297,33 @@
         cedula: document.getElementById('f-cedula').value.trim(),
         email: document.getElementById('f-email').value.trim(),
         telefono: document.getElementById('f-telefono').value.trim(),
+        telefono2: document.getElementById('f-telefono2').value.trim(),
+        telefono3: document.getElementById('f-telefono3').value.trim(),
         segmento: document.getElementById('f-segmento').value,
         empresa: document.getElementById('f-empresa').value.trim(),
         canal_origen: document.getElementById('f-canal').value,
         codigo_embajador: document.getElementById('f-codigo-embajador').value.trim(),
         fecha_ingreso: document.getElementById('f-fecha-ingreso').value,
+        observaciones: document.getElementById('f-observaciones').value.trim(),
+        ubicaciones: recolectarUbicaciones(),
       };
 
       const btn = document.getElementById('btn-guardar');
       btn.disabled = true;
       btn.textContent = 'Guardando...';
       try {
-        const { cliente } = await api('/api/clientes', { method: 'POST', body: payload });
-        window.location.href = `/clientes/${cliente.id}`;
+        if (esEdicion) {
+          const { cliente } = await api(`/api/clientes/${clienteIdEditar}`, { method: 'PUT', body: payload });
+          window.location.href = `/clientes/${cliente.id}`;
+        } else {
+          const { cliente } = await api('/api/clientes', { method: 'POST', body: payload });
+          window.location.href = `/clientes/${cliente.id}`;
+        }
       } catch (e) {
         errorBox.textContent = e.message;
         errorBox.classList.remove('hidden');
         btn.disabled = false;
-        btn.textContent = 'Guardar cliente';
+        btn.textContent = esEdicion ? 'Guardar cambios' : 'Guardar cliente';
       }
     }
   </script>

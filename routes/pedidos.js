@@ -7,11 +7,25 @@ const router = express.Router();
 const MEDIOS_PAGO = ['efectivo', 'transferencia', 'tarjeta', 'pos'];
 const ESTADOS_PAGO = ['pagado', 'pendiente'];
 const TIPOS_VIANDA = ['economico', 'saludable', 'low_carb'];
+const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
 
 function requireEscritura(req, res, next) {
   if (req.user.rol === 'visor') return res.status(403).json({ error: 'Acceso de solo lectura' });
   next();
 }
+
+// GET /api/pedidos — historial de pedidos con filtros (admin y operador)
+router.get('/', async (req, res, next) => {
+  try {
+    const { cliente_id, fecha_desde, fecha_hasta, estado } = req.query;
+    const filtros = {};
+    if (cliente_id && Number(cliente_id)) filtros.cliente_id = Number(cliente_id);
+    if (fecha_desde && /^\d{4}-\d{2}-\d{2}$/.test(fecha_desde)) filtros.fecha_desde = fecha_desde;
+    if (fecha_hasta && /^\d{4}-\d{2}-\d{2}$/.test(fecha_hasta)) filtros.fecha_hasta = fecha_hasta;
+    if (estado && ESTADOS_CLIENTE.includes(estado)) filtros.estado = estado;
+    res.json({ pedidos: await pedidos.listFiltered(filtros) });
+  } catch (err) { next(err); }
+});
 
 // POST /api/pedidos — registrar nuevo pedido (admin y operador; visor no puede)
 router.post('/', requireEscritura, async (req, res, next) => {

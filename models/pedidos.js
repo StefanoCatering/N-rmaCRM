@@ -8,6 +8,31 @@ async function listByCliente(clienteId) {
   return result.rows;
 }
 
+// Historial de pedidos con filtros (vista de pedidos para admin/operador).
+// filtros: { cliente_id, fecha_desde, fecha_hasta, estado } — todos opcionales.
+// estado se aplica al estado del CLIENTE (no del pago).
+async function listFiltered({ cliente_id, fecha_desde, fecha_hasta, estado } = {}) {
+  const where = [];
+  const params = [];
+  let idx = 1;
+
+  if (cliente_id)  { where.push(`p.cliente_id = $${idx++}`);  params.push(cliente_id); }
+  if (fecha_desde) { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
+  if (fecha_hasta) { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
+  if (estado)      { where.push(`c.estado = $${idx++}`);       params.push(estado); }
+
+  const sql = `
+    SELECT
+      p.id, p.fecha_pedido, p.monto, p.descripcion,
+      c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado
+    FROM pedidos p
+    JOIN clientes c ON c.id = p.cliente_id
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY p.fecha_pedido DESC, p.id DESC
+  `;
+  return (await pool.query(sql, params)).rows;
+}
+
 async function create({ cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion }) {
   const result = await pool.query(
     `INSERT INTO pedidos
@@ -28,4 +53,4 @@ async function create({ cliente_id, fecha_pedido, monto, monto_pagado, estado_pa
   return result.rows[0];
 }
 
-module.exports = { listByCliente, create };
+module.exports = { listByCliente, create, listFiltered };

@@ -90,19 +90,45 @@
           </div>
         ` : ''}
 
+        ${c.observaciones ? `
+          <div class="alerta-banner">
+            ⚠️ Observaciones: ${c.observaciones}
+          </div>
+        ` : ''}
+
         <div class="card">
           <div class="card-title">datos del cliente</div>
           <div class="cliente-info-grid">
             <div class="cliente-info-item"><span class="form-label">Cédula</span><div class="cliente-info-value">${c.cedula}</div></div>
             ${c.empresa ? `<div class="cliente-info-item"><span class="form-label">Empresa</span><div class="cliente-info-value">${c.empresa}</div></div>` : ''}
             <div class="cliente-info-item"><span class="form-label">Email</span><div class="cliente-info-value">${c.email || '—'}</div></div>
-            <div class="cliente-info-item"><span class="form-label">Teléfono</span><div class="cliente-info-value">${c.telefono || '—'}</div></div>
+            <div class="cliente-info-item"><span class="form-label">Teléfono${c.telefono2 || c.telefono3 ? ' 1' : ''}</span><div class="cliente-info-value">${c.telefono || '—'}</div></div>
+            ${c.telefono2 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 2</span><div class="cliente-info-value">${c.telefono2}</div></div>` : ''}
+            ${c.telefono3 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 3</span><div class="cliente-info-value">${c.telefono3}</div></div>` : ''}
             <div class="cliente-info-item"><span class="form-label">Fecha de ingreso</span><div class="cliente-info-value">${fmtFecha(c.fecha_ingreso)}</div></div>
           </div>
-          ${esAdmin ? `
+          ${puedeEscribir || esAdmin ? `
           <div class="btn-row">
-            <button class="btn-secondary" id="btn-cambiar-estado">Cambiar estado</button>
+            ${puedeEscribir ? `<a href="/clientes/${c.id}/editar" class="btn-secondary">Editar</a>` : ''}
+            ${esAdmin ? `<button class="btn-secondary" id="btn-cambiar-estado">Cambiar estado</button>` : ''}
           </div>` : ''}
+        </div>
+
+        <div class="card">
+          <div class="card-title">ubicaciones de entrega</div>
+          ${(c.ubicaciones && c.ubicaciones.length) ? `
+            <div class="cliente-info-grid">
+              ${c.ubicaciones.map((u, i) => `
+                <div class="cliente-info-item">
+                  <span class="form-label">Ubicación ${i + 1}</span>
+                  <div class="cliente-info-value">
+                    ${u.direccion || '—'}${u.zona ? ' · ' + u.zona : ''}
+                    ${u.referencia ? `<div class="nota mt-8">${u.referencia}</div>` : ''}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : '<div class="empty-state">Sin ubicaciones registradas.</div>'}
         </div>
 
         ${c.empresa ? `

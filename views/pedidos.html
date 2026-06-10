@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · pedidos</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">historial de pedidos</div>
+          <div class="view-header-sub" id="resultado-count"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="filter-row">
+          <input type="text" id="f-cliente" list="lista-clientes" placeholder="Buscar cliente por nombre o cédula..."/>
+          <datalist id="lista-clientes"></datalist>
+          <input type="date" id="f-fecha-desde" title="Fecha desde"/>
+          <input type="date" id="f-fecha-hasta" title="Fecha hasta"/>
+          <select id="f-estado">
+            <option value="">Todos los estados</option>
+            <option value="activo">Activo</option>
+            <option value="pausado">Pausado</option>
+            <option value="inactivo">Inactivo</option>
+            <option value="baja">Baja</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+          <button class="btn-secondary" id="btn-limpiar-filtros" style="font-size:12px;">Limpiar filtros</button>
+          <button class="btn-secondary" id="btn-exportar" style="font-size:12px;">↓ Exportar Excel</button>
+        </div>
+
+        <div id="tabla-cont"><div class="empty-state">Cargando...</div></div>
+
+        <div class="metric-grid" id="resumen-grid" style="margin-top:14px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    let timerBuscar = null;
+    let clienteMap = {}; // texto mostrado -> cliente_id
+    let clienteIdSeleccionado = null;
+
+    (async function () {
+      await ensureSession();
+      renderNav('/pedidos');
+
+      cargarPedidos();
+
+      ['f-fecha-desde', 'f-fecha-hasta', 'f-estado'].forEach(id => {
+        document.getElementById(id).addEventListener('change', cargarPedidos);
+      });
+
+      document.getElementById('f-cliente').addEventListener('input', () => {
+        clearTimeout(timerBuscar);
+        timerBuscar = setTimeout(() => {
+          actualizarSugerenciasCliente();
+          actualizarClienteSeleccionado();
+          cargarPedidos();
+        }, 300);
+      });
+
+      document.getElementById('btn-limpiar-filtros').addEventListener('click', () => {
+        document.getElementById('f-cliente').value = '';
+        document.getElementById('f-fecha-desde').value = '';
+        document.getElementById('f-fecha-hasta').value = '';
+        document.getElementById('f-estado').value = '';
+        clienteIdSeleccionado = null;
+        cargarPedidos();
+      });
+
+      document.getElementById('btn-exportar').addEventListener('click', () => {
+        const params = construirParams();
+        const qs = params ? params + '&tipo=pedidos' : 'tipo=pedidos';
+        const a = document.createElement('a');
+        a.href = '/api/export?' + qs;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      });
+    })();
+
+    async function actualizarSugerenciasCliente() {
+      const q = document.getElementById('f-cliente').value.trim();
+      const datalist = document.getElementById('lista-clientes');
+      if (!q) {
+        datalist.innerHTML = '';
+        clienteMap = {};
+        return;
+      }
+      const { clientes } = await api('/api/clientes?q=' + encodeURIComponent(q));
+      clienteMap = {};
+      datalist.innerHTML = clientes.map(c => {
+        const texto = `${c.nombre_completo} (${c.cedula})`;
+        clienteMap[texto] = c.id;
+        return `<option value="${texto}"></option>`;
+      }).join('');
+    }
+
+    function actualizarClienteSeleccionado() {
+      const valor = document.getElementById('f-cliente').value.trim();
+      clienteIdSeleccionado = clienteMap[valor] || null;
+    }
+
+    function construirParams() {
+      const params = new URLSearchParams();
+      if (clienteIdSeleccionado) params.set('cliente_id', clienteIdSeleccionado);
+      const desde = document.getElementById('f-fecha-desde').value;
+      const hasta = document.getElementById('f-fecha-hasta').value;
+      const estado = document.getElementById('f-estado').value;
+      if (desde) params.set('fecha_desde', desde);
+      if (hasta) params.set('fecha_hasta', hasta);
+      if (estado) params.set('estado', estado);
+      return params.toString();
+    }
+
+    async function cargarPedidos() {
+      const params = construirParams();
+      const { pedidos } = await api('/api/pedidos' + (params ? '?' + params : ''));
+      renderTabla(pedidos);
+    }
+
+    function renderTabla(pedidos) {
+      document.getElementById('resultado-count').textContent =
+        `${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'} encontrado${pedidos.length === 1 ? '' : 's'}`;
+
+      const cont = document.getElementById('tabla-cont');
+      if (!pedidos.length) {
+        cont.innerHTML = '<div class="empty-state">No se encontraron pedidos con esos filtros.</div>';
+      } else {
+        cont.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Cliente</th><th>Segmento</th><th>Fecha pedido</th><th>Monto</th><th>Descripción</th></tr>
+              </thead>
+              <tbody>
+                ${pedidos.map(p => `
+                  <tr>
+                    <td style="white-space:normal;min-width:160px;"><strong>${p.nombre_completo}</strong></td>
+                    <td>${SEGMENTO_LABEL[p.segmento]}</td>
+                    <td>${fmtFecha(p.fecha_pedido)}</td>
+                    <td><strong>${fmtGs(p.monto)}</strong></td>
+                    <td style="white-space:normal;">${p.descripcion || '—'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      const totalMonto = pedidos.reduce((sum, p) => sum + Number(p.monto || 0), 0);
+      document.getElementById('resumen-grid').innerHTML = `
+        <div class="metric metric-blue">
+          <div class="metric-label">Cantidad de pedidos</div>
+          <div class="metric-value">${pedidos.length}</div>
+        </div>
+        <div class="metric metric-green">
+          <div class="metric-label">Total del período</div>
+          <div class="metric-value" style="font-size:16px;">${fmtGs(totalMonto)}</div>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

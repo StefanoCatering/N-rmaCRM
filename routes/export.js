@@ -46,6 +46,62 @@ function autoWidth(worksheet) {
 
 // ── Endpoint principal ────────────────────────────────────────────
 
+// GET /api/export?tipo=pedidos — exporta solo la hoja "Pedidos" filtrada
+// (vista de historial de pedidos para admin/operador).
+// Parámetros: cliente_id, fecha_desde, fecha_hasta, estado (estado del cliente).
+async function exportarPedidos(req, res) {
+  const { cliente_id, fecha_desde, fecha_hasta, estado } = req.query;
+  const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
+
+  const where = [];
+  const params = [];
+  let idx = 1;
+
+  if (cliente_id && Number(cliente_id)) { where.push(`p.cliente_id = $${idx++}`);  params.push(Number(cliente_id)); }
+  if (fecha_desde)                      { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
+  if (fecha_hasta)                      { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
+  if (estado && ESTADOS_CLIENTE.includes(estado)) { where.push(`c.estado = $${idx++}`); params.push(estado); }
+
+  const { rows: pedidos } = await pool.query(`
+    SELECT c.nombre_completo, c.cedula, p.fecha_pedido, p.monto, p.descripcion
+    FROM pedidos p
+    JOIN clientes c ON c.id = p.cliente_id
+    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+    ORDER BY p.fecha_pedido DESC, p.id DESC
+  `, params);
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Närma CRM';
+  wb.created = new Date();
+
+  const wsPedidos = wb.addWorksheet('Pedidos');
+  wsPedidos.columns = [
+    { header: 'Nombre cliente', key: 'nombre_completo' },
+    { header: 'Cédula',         key: 'cedula'          },
+    { header: 'Fecha pedido',   key: 'fecha_pedido'    },
+    { header: 'Monto (Gs.)',    key: 'monto'           },
+    { header: 'Descripción',    key: 'descripcion'     },
+  ];
+  styleHeaders(wsPedidos);
+
+  for (const p of pedidos) {
+    wsPedidos.addRow({
+      nombre_completo: p.nombre_completo,
+      cedula:          p.cedula,
+      fecha_pedido:    fmtFecha(p.fecha_pedido),
+      monto:           p.monto,
+      descripcion:     p.descripcion || '',
+    });
+  }
+  autoWidth(wsPedidos);
+
+  const today = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="narma-pedidos-${today}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+
 /**
  * GET /api/export
  *
@@ -53,15 +109,20 @@ function autoWidth(worksheet) {
  *   estado, segmento, canal_origen, empresa, q
  *
  * Parámetros específicos de exportación:
- *   tipo = 'datos' | 'historial'
+ *   tipo = 'datos' | 'historial' | 'pedidos'
  *   fecha_desde, fecha_hasta (solo para historial, filtran la hoja Pedidos)
+ *   tipo=pedidos usa cliente_id, fecha_desde, fecha_hasta, estado (ver exportarPedidos)
  */
 router.get('/', async (req, res, next) => {
   try {
     const { tipo, estado, segmento, canal_origen, empresa, q, fecha_desde, fecha_hasta } = req.query;
 
-    if (!['datos', 'historial'].includes(tipo)) {
-      return res.status(400).json({ error: 'Parámetro "tipo" debe ser "datos" o "historial"' });
+    if (!['datos', 'historial', 'pedidos'].includes(tipo)) {
+      return res.status(400).json({ error: 'Parámetro "tipo" debe ser "datos", "historial" o "pedidos"' });
+    }
+
+    if (tipo === 'pedidos') {
+      return await exportarPedidos(req, res);
     }
 
     // ── Construir filtros de clientes ──────────────────────────
