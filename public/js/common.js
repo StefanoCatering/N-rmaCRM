@@ -32,14 +32,14 @@ function initials(nombre) {
 }
 
 const ESTADO_LABEL = { activo: 'Activo', pausado: 'Pausado', inactivo: 'Inactivo', baja: 'Baja' };
-const SEGMENTO_LABEL = { particular: 'Particular', empresa: 'Empresa' };
+const SEGMENTO_LABEL = { particular: 'Particular', empresa: 'Empresa', embajador: 'Embajador' };
 const CANAL_LABEL = {
   whatsapp: 'WhatsApp', redes: 'Redes sociales', embajador: 'Embajador',
   boca_a_boca: 'Boca a boca', b2b: 'B2B', otro: 'Otro',
 };
-const MEDIO_PAGO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', pos: 'POS' };
+const MEDIO_PAGO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', pos: 'POS', cortesia: 'Cortesía' };
 const ESTADO_PAGO_LABEL = { pagado: 'Pagado', pendiente: 'Pendiente', parcial: 'Parcial' };
-const TIPO_VIANDA_LABEL = { economico: 'Económico', saludable: 'Saludable', low_carb: 'Low Carb' };
+const TIPO_VIANDA_LABEL = { economico: 'Económico', saludable: 'Saludable', low_carb: 'Low Carb', modificacion_menu: 'Modificación de menú' };
 
 function badgeEstado(estado) {
   return `<span class="badge badge-${estado}">${ESTADO_LABEL[estado] || estado}</span>`;

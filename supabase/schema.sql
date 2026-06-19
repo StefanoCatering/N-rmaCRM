@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   cedula              TEXT NOT NULL UNIQUE,
   email               TEXT,
   telefono            TEXT,
-  segmento            TEXT NOT NULL CHECK (segmento IN ('particular','empresa')),
+  segmento            TEXT NOT NULL CHECK (segmento IN ('particular','empresa','embajador')),
   empresa             TEXT,
   canal_origen        TEXT NOT NULL CHECK (canal_origen IN ('whatsapp','redes','embajador','boca_a_boca','b2b','otro')),
   codigo_embajador    TEXT,
@@ -33,16 +33,19 @@ CREATE TABLE IF NOT EXISTS clientes (
 );
 
 CREATE TABLE IF NOT EXISTS pedidos (
-  id            SERIAL PRIMARY KEY,
-  cliente_id    INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-  fecha_pedido  DATE NOT NULL,
-  monto         INTEGER NOT NULL,
-  monto_pagado  INTEGER,
-  estado_pago   TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado_pago IN ('pagado','pendiente','parcial')),
-  medio_pago    TEXT CHECK (medio_pago IN ('efectivo','transferencia','tarjeta','pos')),
-  tipo_vianda   TEXT CHECK (tipo_vianda IN ('economico','saludable','low_carb')),
-  descripcion   TEXT,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                    SERIAL PRIMARY KEY,
+  cliente_id            INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+  fecha_pedido          DATE NOT NULL,
+  monto                 INTEGER NOT NULL,
+  monto_pagado          INTEGER,
+  estado_pago           TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado_pago IN ('pagado','pendiente','parcial')),
+  medio_pago            TEXT CHECK (medio_pago IN ('efectivo','transferencia','tarjeta','pos','cortesia')),
+  tipo_vianda           TEXT CHECK (tipo_vianda IN ('economico','saludable','low_carb','modificacion_menu')),
+  descripcion           TEXT,
+  fecha_entrega_desde   DATE,
+  fecha_entrega_hasta   DATE,
+  detalle_modificacion  TEXT,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ── Tabla de sesiones (connect-pg-simple) ────────────────────

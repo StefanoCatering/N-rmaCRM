@@ -4,9 +4,9 @@ const pedidos = require('../models/pedidos');
 
 const router = express.Router();
 
-const MEDIOS_PAGO = ['efectivo', 'transferencia', 'tarjeta', 'pos'];
+const MEDIOS_PAGO = ['efectivo', 'transferencia', 'tarjeta', 'pos', 'cortesia'];
 const ESTADOS_PAGO = ['pagado', 'pendiente', 'parcial'];
-const TIPOS_VIANDA = ['economico', 'saludable', 'low_carb'];
+const TIPOS_VIANDA = ['economico', 'saludable', 'low_carb', 'modificacion_menu'];
 const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
 const SEGMENTOS = ['particular', 'empresa'];
 const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
@@ -44,7 +44,8 @@ router.post('/', requireEscritura, async (req, res, next) => {
     const errores = [];
 
     const cliente_id = Number(body.cliente_id);
-    if (!cliente_id || !(await clientes.getById(cliente_id))) errores.push('Cliente inválido');
+    const clienteObj = cliente_id ? await clientes.getById(cliente_id) : null;
+    if (!cliente_id || !clienteObj) errores.push('Cliente inválido');
 
     const fecha_pedido = String(body.fecha_pedido || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha_pedido)) errores.push('Fecha de pedido inválida (formato YYYY-MM-DD)');
@@ -66,9 +67,22 @@ router.post('/', requireEscritura, async (req, res, next) => {
 
     const medio_pago = body.medio_pago ? String(body.medio_pago).trim() : null;
     if (medio_pago && !MEDIOS_PAGO.includes(medio_pago)) errores.push('Medio de pago inválido');
+    if (medio_pago === 'cortesia' && clienteObj && clienteObj.segmento !== 'embajador') {
+      errores.push('El medio de pago "Cortesía" solo puede usarse con clientes del segmento Embajador');
+    }
 
     const tipo_vianda = body.tipo_vianda ? String(body.tipo_vianda).trim() : null;
     if (tipo_vianda && !TIPOS_VIANDA.includes(tipo_vianda)) errores.push('Tipo de vianda inválido');
+
+    const detalle_modificacion = body.detalle_modificacion ? String(body.detalle_modificacion).trim() : null;
+    if (tipo_vianda === 'modificacion_menu' && !detalle_modificacion) {
+      errores.push('El detalle de la modificación es requerido cuando el tipo de vianda es "Modificación de menú"');
+    }
+
+    const fecha_entrega_desde = body.fecha_entrega_desde ? String(body.fecha_entrega_desde).trim() : null;
+    if (fecha_entrega_desde && !/^\d{4}-\d{2}-\d{2}$/.test(fecha_entrega_desde)) errores.push('Fecha de entrega desde inválida (formato YYYY-MM-DD)');
+    const fecha_entrega_hasta = body.fecha_entrega_hasta ? String(body.fecha_entrega_hasta).trim() : null;
+    if (fecha_entrega_hasta && !/^\d{4}-\d{2}-\d{2}$/.test(fecha_entrega_hasta)) errores.push('Fecha de entrega hasta inválida (formato YYYY-MM-DD)');
 
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
@@ -87,6 +101,9 @@ router.post('/', requireEscritura, async (req, res, next) => {
       medio_pago,
       tipo_vianda,
       descripcion: body.descripcion ? String(body.descripcion).trim() : null,
+      fecha_entrega_desde,
+      fecha_entrega_hasta,
+      detalle_modificacion,
     });
     res.status(201).json({ pedido });
   } catch (err) { next(err); }

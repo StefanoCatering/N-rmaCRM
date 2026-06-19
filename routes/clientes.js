@@ -6,7 +6,7 @@ const { ALERT_DAYS } = require('../config');
 
 const router = express.Router();
 
-const SEGMENTOS = ['particular', 'empresa'];
+const SEGMENTOS = ['particular', 'empresa', 'embajador'];
 const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 const ESTADOS = ['activo', 'pausado', 'inactivo', 'baja'];
 
@@ -126,6 +126,8 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       ticket_promedio_segmento,
       evolucion_activos,
       pedidos_semana,
+      viandas_entregadas_semana,
+      cortesias_mes,
     ] = await Promise.all([
       clientes.countActivos(),
       clientes.countAlertas(),
@@ -134,7 +136,9 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       clientes.ticketPromedioGeneral(),
       clientes.ticketPromedioPorSegmento(),
       clientes.evolucionActivosPorMes(6),
-      pedidos.countEstaSemana(),
+      pedidos.countRecepcionadasEstaSemana(),
+      pedidos.countEntregadasEstaSemana(),
+      pedidos.countCortesiaMes(),
     ]);
     res.json({
       total_activos,
@@ -145,6 +149,8 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       ticket_promedio_segmento,
       evolucion_activos,
       pedidos_semana,
+      viandas_entregadas_semana,
+      cortesias_mes,
       alert_days: ALERT_DAYS,
     });
   } catch (err) { next(err); }

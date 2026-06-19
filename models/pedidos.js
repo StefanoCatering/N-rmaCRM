@@ -50,7 +50,8 @@ async function listFiltered({
 // Cantidad de pedidos de vianda (tipo_vianda IS NOT NULL) cuya fecha_pedido cae
 // dentro de la semana corriente (lunes a domingo). date_trunc('week', ...) en
 // Postgres trunca al lunes de esa semana (ISO 8601).
-async function countEstaSemana() {
+// (ex countEstaSemana — renombrada para distinguirla de countEntregadasEstaSemana)
+async function countRecepcionadasEstaSemana() {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE tipo_vianda IS NOT NULL
@@ -60,11 +61,40 @@ async function countEstaSemana() {
   return r.rows[0].n;
 }
 
-async function create({ cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion }) {
+// Cantidad de pedidos cuya ventana de entrega [fecha_entrega_desde, fecha_entrega_hasta]
+// se solapa con la semana corriente (lunes a domingo). Condición de solapamiento estándar:
+// A.desde <= B.hasta AND A.hasta >= B.desde, donde B es la semana corriente.
+async function countEntregadasEstaSemana() {
+  const r = await pool.query(`
+    SELECT COUNT(*)::integer AS n FROM pedidos
+    WHERE fecha_entrega_desde IS NOT NULL
+      AND fecha_entrega_hasta IS NOT NULL
+      AND fecha_entrega_desde <= (date_trunc('week', CURRENT_DATE) + INTERVAL '6 days')::date
+      AND fecha_entrega_hasta >= date_trunc('week', CURRENT_DATE)::date
+  `);
+  return r.rows[0].n;
+}
+
+// Cantidad de pedidos de cortesía (medio_pago = 'cortesia') cuya fecha_pedido
+// cae en el mes corriente. Mismo patrón que countAltasMes en models/clientes.js.
+async function countCortesiaMes() {
+  const r = await pool.query(`
+    SELECT COUNT(*)::integer AS n FROM pedidos
+    WHERE medio_pago = 'cortesia'
+      AND to_char(fecha_pedido, 'YYYY-MM') = to_char(CURRENT_DATE, 'YYYY-MM')
+  `);
+  return r.rows[0].n;
+}
+
+async function create({
+  cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
+  fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion,
+}) {
   const result = await pool.query(
     `INSERT INTO pedidos
-       (cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
+        fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       cliente_id,
@@ -75,9 +105,15 @@ async function create({ cliente_id, fecha_pedido, monto, monto_pagado, estado_pa
       medio_pago || null,
       tipo_vianda || null,
       descripcion || null,
+      fecha_entrega_desde || null,
+      fecha_entrega_hasta || null,
+      detalle_modificacion || null,
     ]
   );
   return result.rows[0];
 }
 
-module.exports = { listByCliente, create, listFiltered, countEstaSemana };
+module.exports = {
+  listByCliente, create, listFiltered,
+  countRecepcionadasEstaSemana, countEntregadasEstaSemana, countCortesiaMes,
+};

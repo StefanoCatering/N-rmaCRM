@@ -193,7 +193,11 @@
                       <td>${badgeEstadoPago(p.estado_pago)}</td>
                       <td>${p.medio_pago ? MEDIO_PAGO_LABEL[p.medio_pago] : '—'}</td>
                       <td>${p.tipo_vianda ? TIPO_VIANDA_LABEL[p.tipo_vianda] : '—'}</td>
-                      <td style="white-space:normal;">${p.descripcion || '—'}</td>
+                      <td style="white-space:normal;">
+                        ${p.descripcion || '—'}
+                        ${p.detalle_modificacion ? `<div class="nota mt-8" style="margin-bottom:0;">Modificación: ${p.detalle_modificacion}</div>` : ''}
+                        ${(p.fecha_entrega_desde || p.fecha_entrega_hasta) ? `<div class="text-muted" style="font-size:9px;margin-top:4px;">Entrega: ${p.fecha_entrega_desde ? fmtFecha(p.fecha_entrega_desde) : '—'} a ${p.fecha_entrega_hasta ? fmtFecha(p.fecha_entrega_hasta) : '—'}</div>` : ''}
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>

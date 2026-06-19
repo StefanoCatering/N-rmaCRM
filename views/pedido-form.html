@@ -49,7 +49,25 @@
             <option value="economico">Económico</option>
             <option value="saludable">Saludable</option>
             <option value="low_carb">Low Carb</option>
+            <option value="modificacion_menu">Modificación de menú</option>
           </select>
+        </div>
+
+        <div class="form-group hidden" id="grupo-detalle-modificacion">
+          <label class="form-label">Detalle de la modificación</label>
+          <textarea id="f-detalle-modificacion" placeholder="Describí la modificación solicitada"></textarea>
+          <div class="nota mt-8">Requerido cuando el tipo de vianda es "Modificación de menú".</div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Fecha entrega desde</label>
+            <input type="date" id="f-entrega-desde"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha entrega hasta</label>
+            <input type="date" id="f-entrega-hasta"/>
+          </div>
         </div>
 
         <div class="form-row">
@@ -61,6 +79,7 @@
               <option value="transferencia">Transferencia</option>
               <option value="tarjeta">Tarjeta</option>
               <option value="pos">POS</option>
+              <option value="cortesia" id="opt-cortesia" disabled>Cortesía (solo embajadores)</option>
             </select>
           </div>
           <div class="form-group">
@@ -117,6 +136,7 @@
         clienteSeleccionado = null;
         document.getElementById('f-cliente-id').value = '';
         document.getElementById('cliente-seleccionado').classList.add('hidden');
+        actualizarOpcionCortesia();
         clearTimeout(timerBuscar);
         const q = inputBuscar.value.trim();
         if (!q) { document.getElementById('cliente-resultados').classList.add('hidden'); return; }
@@ -133,11 +153,29 @@
 
       document.getElementById('f-estado-pago').addEventListener('change', toggleMontoAbonado);
       toggleMontoAbonado();
+
+      document.getElementById('f-tipo-vianda').addEventListener('change', toggleDetalleModificacion);
+      toggleDetalleModificacion();
     })();
 
     function toggleMontoAbonado() {
       const esParcial = document.getElementById('f-estado-pago').value === 'parcial';
       document.getElementById('grupo-monto-abonado').classList.toggle('hidden', !esParcial);
+    }
+
+    function toggleDetalleModificacion() {
+      const esModificacion = document.getElementById('f-tipo-vianda').value === 'modificacion_menu';
+      document.getElementById('grupo-detalle-modificacion').classList.toggle('hidden', !esModificacion);
+    }
+
+    // Habilita "Cortesía" solo si el cliente seleccionado es del segmento Embajador.
+    // Si estaba seleccionado y deja de ser válido, resetea el medio de pago.
+    function actualizarOpcionCortesia() {
+      const optCortesia = document.getElementById('opt-cortesia');
+      const esEmbajador = !!(clienteSeleccionado && clienteSeleccionado.segmento === 'embajador');
+      optCortesia.disabled = !esEmbajador;
+      const selMedioPago = document.getElementById('f-medio-pago');
+      if (!esEmbajador && selMedioPago.value === 'cortesia') selMedioPago.value = '';
     }
 
     async function buscarClientes(q) {
@@ -171,6 +209,7 @@
       const sel = document.getElementById('cliente-seleccionado');
       sel.textContent = `Cliente seleccionado: ${cliente.nombre_completo} (${cliente.cedula})`;
       sel.classList.remove('hidden');
+      actualizarOpcionCortesia();
     }
 
     async function guardar() {
@@ -186,9 +225,17 @@
       const monto = parseInt(document.getElementById('f-monto').value, 10);
       const estadoPago = document.getElementById('f-estado-pago').value;
       const montoPagadoStr = document.getElementById('f-monto-pagado').value.trim();
+      const tipoVianda = document.getElementById('f-tipo-vianda').value;
+      const detalleModificacion = document.getElementById('f-detalle-modificacion').value.trim();
 
       if (estadoPago === 'parcial' && !montoPagadoStr) {
         errorBox.textContent = 'El monto abonado es requerido para pago parcial.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      if (tipoVianda === 'modificacion_menu' && !detalleModificacion) {
+        errorBox.textContent = 'El detalle de la modificación es requerido para "Modificación de menú".';
         errorBox.classList.remove('hidden');
         return;
       }
@@ -205,8 +252,11 @@
         monto_pagado,
         estado_pago: estadoPago,
         medio_pago: document.getElementById('f-medio-pago').value,
-        tipo_vianda: document.getElementById('f-tipo-vianda').value,
+        tipo_vianda: tipoVianda,
         descripcion: document.getElementById('f-descripcion').value.trim(),
+        detalle_modificacion: tipoVianda === 'modificacion_menu' ? detalleModificacion : null,
+        fecha_entrega_desde: document.getElementById('f-entrega-desde').value || null,
+        fecha_entrega_hasta: document.getElementById('f-entrega-hasta').value || null,
       };
 
       const btn = document.getElementById('btn-guardar');
