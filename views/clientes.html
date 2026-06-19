@@ -196,7 +196,7 @@
 
     function renderTabla(clientes) {
       document.getElementById('resultado-count').textContent =
-        `${clientes.length} cliente${clientes.length === 1 ? '' : 's'} encontrado${clientes.length === 1 ? '' : 's'}`;
+        `Mostrando ${clientes.length} cliente${clientes.length === 1 ? '' : 's'}`;
 
       const cont = document.getElementById('tabla-cont');
       if (!clientes.length) {

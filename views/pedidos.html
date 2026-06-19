@@ -32,6 +32,32 @@
             <option value="inactivo">Inactivo</option>
             <option value="baja">Baja</option>
           </select>
+          <select id="f-estado-pago">
+            <option value="">Todos los pagos</option>
+            <option value="pagado">Pagado</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="parcial">Parcial</option>
+          </select>
+          <select id="f-tipo-vianda">
+            <option value="">Todas las viandas</option>
+            <option value="saludable">Saludable</option>
+            <option value="low_carb">Low Carb</option>
+            <option value="economico">Económico</option>
+            <option value="sin_vianda">Sin vianda</option>
+          </select>
+          <select id="f-segmento">
+            <option value="">Todos los segmentos</option>
+            <option value="particular">Particular</option>
+            <option value="empresa">Empresa</option>
+          </select>
+          <select id="f-canal">
+            <option value="">Todos los canales</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="redes">Redes sociales</option>
+            <option value="b2b">B2B</option>
+            <option value="boca_a_boca">Boca a boca</option>
+            <option value="embajador">Embajador</option>
+          </select>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
           <button class="btn-secondary" id="btn-limpiar-filtros" style="font-size:12px;">Limpiar filtros</button>
@@ -57,7 +83,7 @@
 
       cargarPedidos();
 
-      ['f-fecha-desde', 'f-fecha-hasta', 'f-estado'].forEach(id => {
+      ['f-fecha-desde', 'f-fecha-hasta', 'f-estado', 'f-estado-pago', 'f-tipo-vianda', 'f-segmento', 'f-canal'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarPedidos);
       });
 
@@ -75,6 +101,10 @@
         document.getElementById('f-fecha-desde').value = '';
         document.getElementById('f-fecha-hasta').value = '';
         document.getElementById('f-estado').value = '';
+        document.getElementById('f-estado-pago').value = '';
+        document.getElementById('f-tipo-vianda').value = '';
+        document.getElementById('f-segmento').value = '';
+        document.getElementById('f-canal').value = '';
         clienteIdSeleccionado = null;
         cargarPedidos();
       });
@@ -118,9 +148,17 @@
       const desde = document.getElementById('f-fecha-desde').value;
       const hasta = document.getElementById('f-fecha-hasta').value;
       const estado = document.getElementById('f-estado').value;
+      const estadoPago = document.getElementById('f-estado-pago').value;
+      const tipoVianda = document.getElementById('f-tipo-vianda').value;
+      const segmento = document.getElementById('f-segmento').value;
+      const canal = document.getElementById('f-canal').value;
       if (desde) params.set('fecha_desde', desde);
       if (hasta) params.set('fecha_hasta', hasta);
       if (estado) params.set('estado', estado);
+      if (estadoPago) params.set('estado_pago', estadoPago);
+      if (tipoVianda) params.set('tipo_vianda', tipoVianda);
+      if (segmento) params.set('segmento', segmento);
+      if (canal) params.set('canal_origen', canal);
       return params.toString();
     }
 
@@ -132,7 +170,7 @@
 
     function renderTabla(pedidos) {
       document.getElementById('resultado-count').textContent =
-        `${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'} encontrado${pedidos.length === 1 ? '' : 's'}`;
+        `Mostrando ${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'}`;
 
       const cont = document.getElementById('tabla-cont');
       if (!pedidos.length) {

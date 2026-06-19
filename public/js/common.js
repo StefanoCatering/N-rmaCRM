@@ -38,7 +38,7 @@ const CANAL_LABEL = {
   boca_a_boca: 'Boca a boca', b2b: 'B2B', otro: 'Otro',
 };
 const MEDIO_PAGO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', pos: 'POS' };
-const ESTADO_PAGO_LABEL = { pagado: 'Pagado', pendiente: 'Pendiente' };
+const ESTADO_PAGO_LABEL = { pagado: 'Pagado', pendiente: 'Pendiente', parcial: 'Parcial' };
 const TIPO_VIANDA_LABEL = { economico: 'Económico', saludable: 'Saludable', low_carb: 'Low Carb' };
 
 function badgeEstado(estado) {

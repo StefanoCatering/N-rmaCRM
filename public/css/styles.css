@@ -213,6 +213,7 @@ tr:hover td { background: var(--beige); }
 /* estado de pago de pedidos */
 .badge-pago-pagado    { background: var(--green);  color: white; }
 .badge-pago-pendiente { background: var(--yellow); color: var(--navy); }
+.badge-pago-parcial   { background: var(--orange); color: white; }
 
 /* ══════════════════════════════════════════════════════
    TABS

@@ -75,6 +75,11 @@
           <div class="metric-value" style="font-size:16px;">${fmtGs(k.ticket_promedio_general)}</div>
           <div class="metric-sub">todos los pedidos</div>
         </div>
+        <div class="metric metric-blue">
+          <div class="metric-label">Pedidos esta semana</div>
+          <div class="metric-value">${k.pedidos_semana}</div>
+          <div class="metric-sub">viandas, lunes a domingo</div>
+        </div>
       `;
 
       document.getElementById('ticket-segmento').innerHTML = `

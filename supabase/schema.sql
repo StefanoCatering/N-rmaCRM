@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
   fecha_pedido  DATE NOT NULL,
   monto         INTEGER NOT NULL,
   monto_pagado  INTEGER,
-  estado_pago   TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado_pago IN ('pagado','pendiente')),
+  estado_pago   TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado_pago IN ('pagado','pendiente','parcial')),
   medio_pago    TEXT CHECK (medio_pago IN ('efectivo','transferencia','tarjeta','pos')),
   tipo_vianda   TEXT CHECK (tipo_vianda IN ('economico','saludable','low_carb')),
   descripcion   TEXT,

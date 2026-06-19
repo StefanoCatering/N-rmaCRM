@@ -125,6 +125,7 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       ticket_promedio_general,
       ticket_promedio_segmento,
       evolucion_activos,
+      pedidos_semana,
     ] = await Promise.all([
       clientes.countActivos(),
       clientes.countAlertas(),
@@ -133,6 +134,7 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       clientes.ticketPromedioGeneral(),
       clientes.ticketPromedioPorSegmento(),
       clientes.evolucionActivosPorMes(6),
+      pedidos.countEstaSemana(),
     ]);
     res.json({
       total_activos,
@@ -142,6 +144,7 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       ticket_promedio_general,
       ticket_promedio_segmento,
       evolucion_activos,
+      pedidos_semana,
       alert_days: ALERT_DAYS,
     });
   } catch (err) { next(err); }

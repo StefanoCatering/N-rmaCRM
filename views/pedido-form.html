@@ -68,14 +68,15 @@
             <select id="f-estado-pago">
               <option value="pendiente">Pendiente</option>
               <option value="pagado">Pagado</option>
+              <option value="parcial">Pago parcial</option>
             </select>
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Monto pagado (Gs.)</label>
-          <input type="number" id="f-monto-pagado" placeholder="Dejar vacío si todavía no se pagó nada" step="1" min="0"/>
-          <div class="nota mt-8">Útil para registrar pagos parciales. Si marcás "Pagado" y dejás esto vacío, se asume el monto completo.</div>
+        <div class="form-group hidden" id="grupo-monto-abonado">
+          <label class="form-label">Monto abonado (Gs.)</label>
+          <input type="number" id="f-monto-pagado" placeholder="Ej: 50000" step="1" min="0"/>
+          <div class="nota mt-8">Requerido cuando el estado de pago es "Pago parcial".</div>
         </div>
 
         <div class="form-group">
@@ -129,7 +130,15 @@
       });
 
       document.getElementById('btn-guardar').addEventListener('click', guardar);
+
+      document.getElementById('f-estado-pago').addEventListener('change', toggleMontoAbonado);
+      toggleMontoAbonado();
     })();
+
+    function toggleMontoAbonado() {
+      const esParcial = document.getElementById('f-estado-pago').value === 'parcial';
+      document.getElementById('grupo-monto-abonado').classList.toggle('hidden', !esParcial);
+    }
 
     async function buscarClientes(q) {
       const { clientes } = await api('/api/clientes?q=' + encodeURIComponent(q));
@@ -175,13 +184,26 @@
       }
 
       const monto = parseInt(document.getElementById('f-monto').value, 10);
+      const estadoPago = document.getElementById('f-estado-pago').value;
       const montoPagadoStr = document.getElementById('f-monto-pagado').value.trim();
+
+      if (estadoPago === 'parcial' && !montoPagadoStr) {
+        errorBox.textContent = 'El monto abonado es requerido para pago parcial.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      // pagado → el servidor asigna monto_pagado = monto automáticamente
+      // pendiente → monto_pagado = null
+      // parcial → se envía el monto abonado ingresado
+      const monto_pagado = estadoPago === 'parcial' ? parseInt(montoPagadoStr, 10) : null;
+
       const payload = {
         cliente_id: clienteSeleccionado.id,
         fecha_pedido: document.getElementById('f-fecha').value,
         monto,
-        monto_pagado: montoPagadoStr ? parseInt(montoPagadoStr, 10) : null,
-        estado_pago: document.getElementById('f-estado-pago').value,
+        monto_pagado,
+        estado_pago: estadoPago,
         medio_pago: document.getElementById('f-medio-pago').value,
         tipo_vianda: document.getElementById('f-tipo-vianda').value,
         descripcion: document.getElementById('f-descripcion').value.trim(),
