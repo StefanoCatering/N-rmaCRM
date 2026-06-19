@@ -267,7 +267,7 @@
                       <td>${p.monto_pagado !== null && p.monto_pagado !== undefined ? fmtGs(p.monto_pagado) : '—'}</td>
                       <td style="white-space:nowrap;">
                         ${badgeEstadoPago(p.estado_pago)}
-                        ${esAdmin ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
+                        ${puedeEscribir ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
                       </td>
                       <td>${p.medio_pago ? MEDIO_PAGO_LABEL[p.medio_pago] : '—'}</td>
                       <td>${p.tipo_vianda ? TIPO_VIANDA_LABEL[p.tipo_vianda] : '—'}</td>

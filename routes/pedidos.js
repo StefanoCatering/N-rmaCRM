@@ -114,8 +114,8 @@ router.post('/', requireEscritura, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PATCH /api/pedidos/:id/pago — modificar estado de pago de un pedido (solo admin)
-router.patch('/:id/pago', requireAdmin, async (req, res, next) => {
+// PATCH /api/pedidos/:id/pago — modificar estado de pago de un pedido (admin y operador)
+router.patch('/:id/pago', requireEscritura, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const pedido = id ? await pedidos.getById(id) : null;
