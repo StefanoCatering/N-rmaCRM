@@ -17,6 +17,11 @@ function requireEscritura(req, res, next) {
   next();
 }
 
+function requireAdmin(req, res, next) {
+  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
+  next();
+}
+
 // GET /api/pedidos — historial de pedidos con filtros (admin y operador)
 router.get('/', async (req, res, next) => {
   try {
@@ -106,6 +111,39 @@ router.post('/', requireEscritura, async (req, res, next) => {
       detalle_modificacion,
     });
     res.status(201).json({ pedido });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/pedidos/:id/pago — modificar estado de pago de un pedido (solo admin)
+router.patch('/:id/pago', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pedido = id ? await pedidos.getById(id) : null;
+    if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+    const body = req.body || {};
+    const estado_pago = body.estado_pago ? String(body.estado_pago).trim() : '';
+    if (!ESTADOS_PAGO.includes(estado_pago)) {
+      return res.status(400).json({ error: 'Estado de pago inválido' });
+    }
+
+    // Resolver monto_pagado según el estado:
+    // pagado → monto completo del pedido; pendiente → null; parcial → monto del body (entero > 0).
+    let monto_pagado;
+    if (estado_pago === 'pagado') {
+      monto_pagado = pedido.monto;
+    } else if (estado_pago === 'pendiente') {
+      monto_pagado = null;
+    } else { // parcial
+      const mp = Number(body.monto_pagado);
+      if (!Number.isInteger(mp) || mp <= 0) {
+        return res.status(400).json({ error: 'El monto abonado es requerido y debe ser un número entero mayor a 0' });
+      }
+      monto_pagado = mp;
+    }
+
+    const actualizado = await pedidos.updatePago(id, estado_pago, monto_pagado);
+    res.json({ pedido: actualizado });
   } catch (err) { next(err); }
 });
 

@@ -41,6 +41,30 @@
     </div>
   </div>
 
+  <!-- Modal modificar pago de un pedido (solo admin) -->
+  <div id="modal-pago" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:360px;width:100%;">
+      <div class="card-title">modificar pago</div>
+      <div class="form-group">
+        <label class="form-label">Estado de pago</label>
+        <select id="modal-pago-estado">
+          <option value="pagado">Pagado</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="parcial">Parcial</option>
+        </select>
+      </div>
+      <div class="form-group hidden" id="modal-pago-grupo-monto">
+        <label class="form-label">Monto abonado (Gs.)</label>
+        <input type="number" id="modal-pago-monto" placeholder="Ej: 50000" step="1" min="0"/>
+      </div>
+      <div id="modal-pago-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-pago-guardar">Guardar</button>
+        <button class="btn-secondary" id="modal-pago-cancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/js/common.js"></script>
   <script>
     const clienteId = window.location.pathname.split('/').pop();
@@ -55,7 +79,58 @@
         document.getElementById('modal-estado').classList.add('hidden');
       });
       document.getElementById('modal-estado-confirmar').addEventListener('click', confirmarCambioEstado);
+
+      document.getElementById('modal-pago-cancelar').addEventListener('click', () => {
+        document.getElementById('modal-pago').classList.add('hidden');
+      });
+      document.getElementById('modal-pago-estado').addEventListener('change', toggleModalPagoMonto);
+      document.getElementById('modal-pago-guardar').addEventListener('click', guardarPago);
     })();
+
+    let pedidoEditando = null;
+
+    function toggleModalPagoMonto() {
+      const esParcial = document.getElementById('modal-pago-estado').value === 'parcial';
+      document.getElementById('modal-pago-grupo-monto').classList.toggle('hidden', !esParcial);
+    }
+
+    function abrirModalPago(ds) {
+      pedidoEditando = { id: Number(ds.id), monto: Number(ds.monto) };
+      document.getElementById('modal-pago-estado').value = ds.estado;
+      document.getElementById('modal-pago-monto').value = ds.pagado || '';
+      toggleModalPagoMonto();
+      document.getElementById('modal-pago-error').classList.add('hidden');
+      document.getElementById('modal-pago').classList.remove('hidden');
+    }
+
+    async function guardarPago() {
+      const estado_pago = document.getElementById('modal-pago-estado').value;
+      const montoStr = document.getElementById('modal-pago-monto').value.trim();
+      const errorBox = document.getElementById('modal-pago-error');
+      const btn = document.getElementById('modal-pago-guardar');
+      errorBox.classList.add('hidden');
+
+      if (estado_pago === 'parcial' && (!montoStr || Number(montoStr) <= 0)) {
+        errorBox.textContent = 'El monto abonado es requerido y debe ser mayor a 0.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      const body = { estado_pago };
+      if (estado_pago === 'parcial') body.monto_pagado = parseInt(montoStr, 10);
+
+      btn.disabled = true;
+      try {
+        await api(`/api/pedidos/${pedidoEditando.id}/pago`, { method: 'PATCH', body });
+        document.getElementById('modal-pago').classList.add('hidden');
+        await cargarFicha();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
 
     async function cargarFicha() {
       let data;
@@ -190,7 +265,10 @@
                       <td>${fmtFecha(p.fecha_pedido)}</td>
                       <td><strong>${fmtGs(p.monto)}</strong></td>
                       <td>${p.monto_pagado !== null && p.monto_pagado !== undefined ? fmtGs(p.monto_pagado) : '—'}</td>
-                      <td>${badgeEstadoPago(p.estado_pago)}</td>
+                      <td style="white-space:nowrap;">
+                        ${badgeEstadoPago(p.estado_pago)}
+                        ${esAdmin ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
+                      </td>
                       <td>${p.medio_pago ? MEDIO_PAGO_LABEL[p.medio_pago] : '—'}</td>
                       <td>${p.tipo_vianda ? TIPO_VIANDA_LABEL[p.tipo_vianda] : '—'}</td>
                       <td style="white-space:normal;">
@@ -215,6 +293,10 @@
           document.getElementById('modal-estado').classList.remove('hidden');
         });
       }
+
+      document.querySelectorAll('.btn-editar-pago').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalPago(btn.dataset));
+      });
     }
 
     async function confirmarCambioEstado() {

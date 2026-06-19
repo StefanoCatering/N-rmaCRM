@@ -8,6 +8,20 @@ async function listByCliente(clienteId) {
   return result.rows;
 }
 
+async function getById(id) {
+  const result = await pool.query('SELECT * FROM pedidos WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
+// Actualiza solo el estado de pago y el monto pagado de un pedido existente.
+async function updatePago(id, estado_pago, monto_pagado) {
+  const result = await pool.query(
+    `UPDATE pedidos SET estado_pago = $1, monto_pagado = $2 WHERE id = $3 RETURNING *`,
+    [estado_pago, monto_pagado === undefined ? null : monto_pagado, id]
+  );
+  return result.rows[0] || null;
+}
+
 // Historial de pedidos con filtros (vista de pedidos para admin/operador).
 // filtros: { cliente_id, fecha_desde, fecha_hasta, estado, estado_pago, tipo_vianda,
 //            segmento, canal_origen } — todos opcionales.
@@ -114,6 +128,6 @@ async function create({
 }
 
 module.exports = {
-  listByCliente, create, listFiltered,
+  listByCliente, getById, create, listFiltered, updatePago,
   countRecepcionadasEstaSemana, countEntregadasEstaSemana, countCortesiaMes,
 };
