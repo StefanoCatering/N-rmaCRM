@@ -15,7 +15,7 @@
       <div class="view-header">
         <div>
           <div class="view-header-title">dashboard</div>
-          <div class="view-header-sub">Resumen comercial y alertas de seguimiento</div>
+          <div class="view-header-sub">Resumen comercial</div>
         </div>
       </div>
 
@@ -30,11 +30,6 @@
         <div class="card-title">ticket promedio por segmento</div>
         <div class="metric-grid" id="ticket-segmento"></div>
       </div>
-
-      <div class="card">
-        <div class="card-title">alertas — clientes sin pedido reciente</div>
-        <div id="alertas-cont"><div class="empty-state">Cargando...</div></div>
-      </div>
     </div>
   </div>
 
@@ -43,7 +38,7 @@
     (async function () {
       await ensureSession();
       renderNav('/dashboard');
-      await Promise.all([cargarKpis(), cargarAlertas()]);
+      await cargarKpis();
     })();
 
     async function cargarKpis() {
@@ -54,11 +49,6 @@
           <div class="metric-label">Clientes activos</div>
           <div class="metric-value">${k.total_activos}</div>
           <div class="metric-sub">total</div>
-        </div>
-        <div class="metric metric-orange">
-          <div class="metric-label">Con alerta</div>
-          <div class="metric-value">${k.alertas}</div>
-          <div class="metric-sub">+${k.alert_days} días sin pedir</div>
         </div>
         <div class="metric metric-green">
           <div class="metric-label">Altas del mes</div>
@@ -123,58 +113,6 @@
             <div class="chart-bar-label">${MESES[parseInt(m, 10) - 1]}</div>
           </div>`;
       }).join('')}</div>`;
-    }
-
-    async function cargarAlertas() {
-      const { alertas, alertDays } = await api('/api/clientes/alertas');
-      const cont = document.getElementById('alertas-cont');
-
-      if (!alertas.length) {
-        cont.innerHTML = `<div class="empty-state">No hay clientes con más de ${alertDays} días sin pedir. 🎉</div>`;
-        return;
-      }
-
-      cont.innerHTML = `
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Nombre</th><th>Segmento</th><th>Último pedido</th><th>Días sin pedir</th><th></th></tr>
-            </thead>
-            <tbody>
-              ${alertas.map(c => `
-                <tr class="alerta-row">
-                  <td><a href="/clientes/${c.id}" class="link-cliente" style="font-weight:600;color:var(--navy);text-decoration:none;">${escapeHtml(c.nombre_completo)}</a></td>
-                  <td>${SEGMENTO_LABEL[c.segmento]}</td>
-                  <td>${fmtFecha(c.ultimo_pedido)}</td>
-                  <td><strong>${c.dias_sin_pedir}</strong> días</td>
-                  <td>${c.seguimiento_marcado
-                    ? `<button class="btn-secondary btn-seguimiento" disabled>Seguimiento marcado ✓ (${fmtFecha(c.seguimiento_fecha)})</button>`
-                    : CURRENT_USER.rol === 'visor'
-                      ? `<span style="color:rgba(240,235,231,0.35);font-size:12px;">Pendiente</span>`
-                      : `<button class="btn-secondary btn-seguimiento" data-id="${c.id}">Marcar seguimiento</button>`
-                  }</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `;
-
-      cont.querySelectorAll('.btn-seguimiento[data-id]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const id = btn.dataset.id;
-          btn.disabled = true;
-          const textoOriginal = btn.textContent;
-          try {
-            const { cliente } = await api(`/api/clientes/${id}/seguimiento`, { method: 'PATCH' });
-            btn.textContent = `Seguimiento marcado ✓ (${fmtFecha(cliente.seguimiento_fecha)})`;
-          } catch (err) {
-            btn.disabled = false;
-            btn.textContent = textoOriginal;
-            alert(err.message || 'No se pudo marcar el seguimiento');
-          }
-        });
-      });
     }
   </script>
 </body>
