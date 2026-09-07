@@ -51,7 +51,7 @@ async function listFiltered({
 
   const sql = `
     SELECT
-      p.id, p.fecha_pedido, p.monto, p.descripcion, p.estado_pago, p.tipo_vianda,
+      p.id, p.fecha_pedido, p.monto, p.monto_pagado, p.descripcion, p.estado_pago, p.tipo_vianda,
       c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen
     FROM pedidos p
     JOIN clientes c ON c.id = p.cliente_id

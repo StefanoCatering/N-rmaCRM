@@ -159,7 +159,7 @@
     function abrirModalPago(ds) {
       pedidoEditando = { id: Number(ds.id), monto: Number(ds.monto) };
       document.getElementById('modal-pago-estado').value = ds.estado;
-      document.getElementById('modal-pago-monto').value = '';
+      document.getElementById('modal-pago-monto').value = (ds.estado === 'parcial' && ds.montoPagado) ? ds.montoPagado : '';
       toggleModalPagoMonto();
       document.getElementById('modal-pago-error').classList.add('hidden');
       document.getElementById('modal-pago').classList.remove('hidden');
@@ -267,7 +267,7 @@
                     <td><strong>${fmtGs(p.monto)}</strong></td>
                     <td style="white-space:nowrap;">
                       ${badgeEstadoPago(p.estado_pago)}
-                      ${puedeEditar ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
+                      ${puedeEditar ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-monto-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
                     </td>
                     <td style="white-space:normal;">${p.descripcion || '—'}</td>
                   </tr>
