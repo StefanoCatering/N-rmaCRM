@@ -186,7 +186,7 @@
       } else {
         cont.innerHTML = clientes.slice(0, 8).map(c => `
           <div class="cliente-resultado-item" data-id="${c.id}" style="padding:8px 10px;cursor:pointer;border-radius:8px;font-size:11px;">
-            <strong>${c.nombre_completo}</strong> <span class="text-muted">· ${c.cedula} · ${SEGMENTO_LABEL[c.segmento]}</span>
+            <strong>${escapeHtml(c.nombre_completo)}</strong> <span class="text-muted">· ${escapeHtml(c.cedula)} · ${SEGMENTO_LABEL[c.segmento]}</span>
           </div>
         `).join('');
         cont.querySelectorAll('.cliente-resultado-item').forEach(el => {
