@@ -187,37 +187,42 @@ async function listAlertas() {
   return r.rows;
 }
 
-async function countAltasMes() {
+// Cantidad de clientes con fecha_ingreso dentro del rango [fecha_desde, fecha_hasta].
+async function countAltas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM clientes
-    WHERE to_char(fecha_ingreso, 'YYYY-MM') = to_char(NOW(), 'YYYY-MM')
-  `);
+    WHERE fecha_ingreso >= $1 AND fecha_ingreso <= $2
+  `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
 
-// Aproximación: una "baja" del mes es un cliente en estado 'baja' cuya última
-// actualización (updated_at) cae en el mes actual.
-async function countBajasMes() {
+// Aproximación: una "baja" del rango es un cliente en estado 'baja' cuya última
+// actualización (updated_at) cae dentro del rango [fecha_desde, fecha_hasta].
+async function countBajas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM clientes
     WHERE estado = 'baja'
-      AND to_char(updated_at, 'YYYY-MM') = to_char(NOW(), 'YYYY-MM')
-  `);
+      AND updated_at::date >= $1 AND updated_at::date <= $2
+  `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
 
-async function ticketPromedioGeneral() {
-  const r = await pool.query('SELECT AVG(monto)::float AS prom FROM pedidos');
+async function ticketPromedioGeneral(fecha_desde, fecha_hasta) {
+  const r = await pool.query(`
+    SELECT AVG(monto)::float AS prom FROM pedidos
+    WHERE fecha_pedido >= $1 AND fecha_pedido <= $2
+  `, [fecha_desde, fecha_hasta]);
   return r.rows[0].prom || 0;
 }
 
-async function ticketPromedioPorSegmento() {
+async function ticketPromedioPorSegmento(fecha_desde, fecha_hasta) {
   const rows = (await pool.query(`
     SELECT c.segmento AS segmento, AVG(pe.monto)::float AS prom
     FROM clientes c
     JOIN pedidos pe ON pe.cliente_id = c.id
+    WHERE pe.fecha_pedido >= $1 AND pe.fecha_pedido <= $2
     GROUP BY c.segmento
-  `)).rows;
+  `, [fecha_desde, fecha_hasta])).rows;
   const out = { particular: 0, empresa: 0 };
   for (const r of rows) out[r.segmento] = r.prom || 0;
   return out;
@@ -257,8 +262,8 @@ module.exports = {
   countActivos,
   countAlertas,
   listAlertas,
-  countAltasMes,
-  countBajasMes,
+  countAltas,
+  countBajas,
   ticketPromedioGeneral,
   ticketPromedioPorSegmento,
   evolucionActivosPorMes,

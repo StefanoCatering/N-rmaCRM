@@ -62,41 +62,41 @@ async function listFiltered({
 }
 
 // Cantidad de pedidos de vianda (tipo_vianda IS NOT NULL) cuya fecha_pedido cae
-// dentro de la semana corriente (lunes a domingo). date_trunc('week', ...) en
-// Postgres trunca al lunes de esa semana (ISO 8601).
-// (ex countEstaSemana — renombrada para distinguirla de countEntregadasEstaSemana)
-async function countRecepcionadasEstaSemana() {
+// dentro del rango [fecha_desde, fecha_hasta].
+// (ex countRecepcionadasEstaSemana — renombrada al dejar de estar atada a la semana corriente)
+async function countRecepcionadas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE tipo_vianda IS NOT NULL
-      AND fecha_pedido >= date_trunc('week', CURRENT_DATE)::date
-      AND fecha_pedido <  (date_trunc('week', CURRENT_DATE) + INTERVAL '7 days')::date
-  `);
+      AND fecha_pedido >= $1 AND fecha_pedido <= $2
+  `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
 
 // Cantidad de pedidos cuya ventana de entrega [fecha_entrega_desde, fecha_entrega_hasta]
-// se solapa con la semana corriente (lunes a domingo). Condición de solapamiento estándar:
-// A.desde <= B.hasta AND A.hasta >= B.desde, donde B es la semana corriente.
-async function countEntregadasEstaSemana() {
+// se solapa con el rango [fecha_desde, fecha_hasta]. Condición de solapamiento estándar:
+// A.desde <= B.hasta AND A.hasta >= B.desde.
+// (ex countEntregadasEstaSemana — renombrada al dejar de estar atada a la semana corriente)
+async function countEntregadas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE fecha_entrega_desde IS NOT NULL
       AND fecha_entrega_hasta IS NOT NULL
-      AND fecha_entrega_desde <= (date_trunc('week', CURRENT_DATE) + INTERVAL '6 days')::date
-      AND fecha_entrega_hasta >= date_trunc('week', CURRENT_DATE)::date
-  `);
+      AND fecha_entrega_desde <= $2
+      AND fecha_entrega_hasta >= $1
+  `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
 
 // Cantidad de pedidos de cortesía (medio_pago = 'cortesia') cuya fecha_pedido
-// cae en el mes corriente. Mismo patrón que countAltasMes en models/clientes.js.
-async function countCortesiaMes() {
+// cae dentro del rango [fecha_desde, fecha_hasta].
+// (ex countCortesiaMes — renombrada al dejar de estar atada al mes corriente)
+async function countCortesia(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE medio_pago = 'cortesia'
-      AND to_char(fecha_pedido, 'YYYY-MM') = to_char(CURRENT_DATE, 'YYYY-MM')
-  `);
+      AND fecha_pedido >= $1 AND fecha_pedido <= $2
+  `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
 
@@ -129,5 +129,5 @@ async function create({
 
 module.exports = {
   listByCliente, getById, create, listFiltered, updatePago,
-  countRecepcionadasEstaSemana, countEntregadasEstaSemana, countCortesiaMes,
+  countRecepcionadas, countEntregadas, countCortesia,
 };

@@ -10,6 +10,27 @@ const SEGMENTOS = ['particular', 'empresa', 'embajador'];
 const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 const ESTADOS = ['activo', 'pausado', 'inactivo', 'baja'];
 
+const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Rango por defecto de los KPIs del dashboard cuando no se pasan fecha_desde/fecha_hasta:
+// el mes actual completo (primer día al último día).
+function rangoMesActual() {
+  const now = new Date();
+  const desde = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const finDeMes = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const hasta = finDeMes.toISOString().split('T')[0];
+  return { desde, hasta };
+}
+
+// Resuelve fecha_desde/fecha_hasta desde query params, con fallback al mes actual
+// si no vienen o no tienen el formato esperado.
+function resolverRangoFechas(query) {
+  const { desde, hasta } = rangoMesActual();
+  const fecha_desde = FECHA_RE.test(query.fecha_desde) ? query.fecha_desde : desde;
+  const fecha_hasta = FECHA_RE.test(query.fecha_hasta) ? query.fecha_hasta : hasta;
+  return { fecha_desde, fecha_hasta };
+}
+
 // Admin y visor pueden ver datos de dashboard (KPIs, alertas)
 function requireAdminOrVisor(req, res, next) {
   if (req.user.rol !== 'admin' && req.user.rol !== 'visor') {
@@ -115,42 +136,48 @@ router.get('/alertas', requireAdminOrVisor, async (req, res, next) => {
 });
 
 // GET /api/clientes/kpis — KPIs del dashboard (admin y visor)
+// Acepta fecha_desde/fecha_hasta (YYYY-MM-DD) para acotar los KPIs de período;
+// sin esos params, default al mes actual completo. total_activos y evolucion_activos
+// no dependen del rango (foto actual / últimos 6 meses corridos).
 router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
   try {
+    const { fecha_desde, fecha_hasta } = resolverRangoFechas(req.query);
     const [
       total_activos,
       alertas,
-      altas_mes,
-      bajas_mes,
+      altas,
+      bajas,
       ticket_promedio_general,
       ticket_promedio_segmento,
       evolucion_activos,
-      pedidos_semana,
-      viandas_entregadas_semana,
-      cortesias_mes,
+      pedidos_recepcionados,
+      viandas_entregadas,
+      cortesias,
     ] = await Promise.all([
       clientes.countActivos(),
       clientes.countAlertas(),
-      clientes.countAltasMes(),
-      clientes.countBajasMes(),
-      clientes.ticketPromedioGeneral(),
-      clientes.ticketPromedioPorSegmento(),
+      clientes.countAltas(fecha_desde, fecha_hasta),
+      clientes.countBajas(fecha_desde, fecha_hasta),
+      clientes.ticketPromedioGeneral(fecha_desde, fecha_hasta),
+      clientes.ticketPromedioPorSegmento(fecha_desde, fecha_hasta),
       clientes.evolucionActivosPorMes(6),
-      pedidos.countRecepcionadasEstaSemana(),
-      pedidos.countEntregadasEstaSemana(),
-      pedidos.countCortesiaMes(),
+      pedidos.countRecepcionadas(fecha_desde, fecha_hasta),
+      pedidos.countEntregadas(fecha_desde, fecha_hasta),
+      pedidos.countCortesia(fecha_desde, fecha_hasta),
     ]);
     res.json({
       total_activos,
       alertas,
-      altas_mes,
-      bajas_mes,
+      altas,
+      bajas,
       ticket_promedio_general,
       ticket_promedio_segmento,
       evolucion_activos,
-      pedidos_semana,
-      viandas_entregadas_semana,
-      cortesias_mes,
+      pedidos_recepcionados,
+      viandas_entregadas,
+      cortesias,
+      fecha_desde,
+      fecha_hasta,
       alert_days: ALERT_DAYS,
     });
   } catch (err) { next(err); }

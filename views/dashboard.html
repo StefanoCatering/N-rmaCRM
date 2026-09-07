@@ -19,6 +19,15 @@
         </div>
       </div>
 
+      <div class="card">
+        <div class="card-title">rango de fechas</div>
+        <div class="filter-row">
+          <input type="date" id="f-fecha-desde" title="Fecha desde"/>
+          <input type="date" id="f-fecha-hasta" title="Fecha hasta"/>
+          <button class="btn-primary" id="btn-aplicar-rango">Aplicar</button>
+        </div>
+      </div>
+
       <div class="metric-grid" id="metric-grid"></div>
 
       <div class="card">
@@ -39,10 +48,25 @@
       await ensureSession();
       renderNav('/dashboard');
       await cargarKpis();
+      document.getElementById('btn-aplicar-rango').addEventListener('click', () => {
+        const desde = document.getElementById('f-fecha-desde').value;
+        const hasta = document.getElementById('f-fecha-hasta').value;
+        if (!desde || !hasta) { alert('Seleccioná ambas fechas'); return; }
+        if (desde > hasta) { alert('La fecha desde no puede ser posterior a la fecha hasta'); return; }
+        cargarKpis(desde, hasta);
+      });
     })();
 
-    async function cargarKpis() {
-      const k = await api('/api/clientes/kpis');
+    async function cargarKpis(fechaDesde, fechaHasta) {
+      const params = new URLSearchParams();
+      if (fechaDesde) params.set('fecha_desde', fechaDesde);
+      if (fechaHasta) params.set('fecha_hasta', fechaHasta);
+      const qs = params.toString();
+      const k = await api('/api/clientes/kpis' + (qs ? `?${qs}` : ''));
+
+      document.getElementById('f-fecha-desde').value = k.fecha_desde;
+      document.getElementById('f-fecha-hasta').value = k.fecha_hasta;
+      const rangoLabel = `${fmtFecha(k.fecha_desde)} – ${fmtFecha(k.fecha_hasta)}`;
 
       document.getElementById('metric-grid').innerHTML = `
         <div class="metric metric-blue">
@@ -51,34 +75,34 @@
           <div class="metric-sub">total</div>
         </div>
         <div class="metric metric-green">
-          <div class="metric-label">Altas del mes</div>
-          <div class="metric-value">${k.altas_mes}</div>
-          <div class="metric-sub">nuevos clientes</div>
+          <div class="metric-label">Altas</div>
+          <div class="metric-value">${k.altas}</div>
+          <div class="metric-sub">nuevos clientes · ${rangoLabel}</div>
         </div>
         <div class="metric metric-yellow">
-          <div class="metric-label">Bajas del mes</div>
-          <div class="metric-value">${k.bajas_mes}</div>
-          <div class="metric-sub">clientes dados de baja</div>
+          <div class="metric-label">Bajas</div>
+          <div class="metric-value">${k.bajas}</div>
+          <div class="metric-sub">clientes dados de baja · ${rangoLabel}</div>
         </div>
         <div class="metric metric-pink">
           <div class="metric-label">Ticket promedio general</div>
           <div class="metric-value" style="font-size:16px;">${fmtGs(k.ticket_promedio_general)}</div>
-          <div class="metric-sub">todos los pedidos</div>
+          <div class="metric-sub">${rangoLabel}</div>
         </div>
         <div class="metric metric-blue">
-          <div class="metric-label">Pedidos recepcionados esta semana</div>
-          <div class="metric-value">${k.pedidos_semana}</div>
-          <div class="metric-sub">viandas, lunes a domingo</div>
+          <div class="metric-label">Pedidos recepcionados</div>
+          <div class="metric-value">${k.pedidos_recepcionados}</div>
+          <div class="metric-sub">${rangoLabel}</div>
         </div>
         <div class="metric metric-green">
-          <div class="metric-label">Viandas entregadas esta semana</div>
-          <div class="metric-value">${k.viandas_entregadas_semana}</div>
-          <div class="metric-sub">según fecha de entrega</div>
+          <div class="metric-label">Viandas entregadas</div>
+          <div class="metric-value">${k.viandas_entregadas}</div>
+          <div class="metric-sub">según fecha de entrega · ${rangoLabel}</div>
         </div>
         <div class="metric metric-yellow">
-          <div class="metric-label">Viandas de cortesía (mes)</div>
-          <div class="metric-value">${k.cortesias_mes}</div>
-          <div class="metric-sub">pedidos con medio de pago cortesía</div>
+          <div class="metric-label">Viandas de cortesía</div>
+          <div class="metric-value">${k.cortesias}</div>
+          <div class="metric-sub">${rangoLabel}</div>
         </div>
       `;
 
