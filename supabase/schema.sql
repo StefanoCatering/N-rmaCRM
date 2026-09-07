@@ -45,7 +45,19 @@ CREATE TABLE IF NOT EXISTS pedidos (
   fecha_entrega_desde   DATE,
   fecha_entrega_hasta   DATE,
   detalle_modificacion  TEXT,
+  cancelado             BOOLEAN NOT NULL DEFAULT false,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Auditoría de ediciones y cancelaciones de pedidos (admin).
+CREATE TABLE IF NOT EXISTS pedidos_auditoria (
+  id          SERIAL PRIMARY KEY,
+  pedido_id   INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  accion      TEXT NOT NULL CHECK (accion IN ('edicion','cancelacion')),
+  usuario     TEXT NOT NULL,
+  detalle     JSONB,
+  motivo      TEXT NOT NULL,
+  fecha       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ── Tabla de sesiones (connect-pg-simple) ────────────────────
@@ -70,3 +82,4 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_fecha       ON pedidos(fecha_pedido);
 CREATE INDEX IF NOT EXISTS idx_clientes_estado     ON clientes(estado);
 CREATE INDEX IF NOT EXISTS idx_clientes_segmento   ON clientes(segmento);
 CREATE INDEX IF NOT EXISTS idx_clientes_empresa    ON clientes(empresa);
+CREATE INDEX IF NOT EXISTS idx_pedidos_auditoria_pedido_id ON pedidos_auditoria(pedido_id);
