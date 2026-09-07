@@ -143,7 +143,7 @@
             <tbody>
               ${alertas.map(c => `
                 <tr class="alerta-row">
-                  <td><a href="/clientes/${c.id}" class="link-cliente" style="font-weight:600;color:var(--navy);text-decoration:none;">${c.nombre_completo}</a></td>
+                  <td><a href="/clientes/${c.id}" class="link-cliente" style="font-weight:600;color:var(--navy);text-decoration:none;">${escapeHtml(c.nombre_completo)}</a></td>
                   <td>${SEGMENTO_LABEL[c.segmento]}</td>
                   <td>${fmtFecha(c.ultimo_pedido)}</td>
                   <td><strong>${c.dias_sin_pedir}</strong> días</td>

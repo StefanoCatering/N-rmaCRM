@@ -220,10 +220,10 @@
                 const enAlerta = c.dias_sin_pedir !== null && c.dias_sin_pedir > window.ALERT_DAYS;
                 return `
                 <tr class="${enAlerta ? 'alerta-row' : ''}">
-                  <td style="white-space:normal;min-width:160px;"><strong>${c.nombre_completo}</strong></td>
-                  <td>${c.cedula}</td>
+                  <td style="white-space:normal;min-width:160px;"><strong>${escapeHtml(c.nombre_completo)}</strong></td>
+                  <td>${escapeHtml(c.cedula)}</td>
                   <td>${SEGMENTO_LABEL[c.segmento]}</td>
-                  <td>${c.empresa || '—'}</td>
+                  <td>${c.empresa ? escapeHtml(c.empresa) : '—'}</td>
                   <td>${CANAL_LABEL[c.canal_origen]}</td>
                   <td>${badgeEstado(c.estado)}</td>
                   <td>${fmtFecha(c.ultimo_pedido)}</td>

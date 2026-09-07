@@ -1,5 +1,15 @@
 // Helpers compartidos por todas las vistas del CRM Närma
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function api(path, options = {}) {
   const opts = Object.assign({ headers: { 'Content-Type': 'application/json' } }, options);
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);

@@ -207,7 +207,7 @@
       datalist.innerHTML = clientes.map(c => {
         const texto = `${c.nombre_completo} (${c.cedula})`;
         clienteMap[texto] = c.id;
-        return `<option value="${texto}"></option>`;
+        return `<option value="${escapeHtml(texto)}"></option>`;
       }).join('');
     }
 
@@ -261,7 +261,7 @@
               <tbody>
                 ${pedidos.map(p => `
                   <tr>
-                    <td style="white-space:normal;min-width:160px;"><strong>${p.nombre_completo}</strong></td>
+                    <td style="white-space:normal;min-width:160px;"><strong>${escapeHtml(p.nombre_completo)}</strong></td>
                     <td>${SEGMENTO_LABEL[p.segmento]}</td>
                     <td>${fmtFecha(p.fecha_pedido)}</td>
                     <td><strong>${fmtGs(p.monto)}</strong></td>
@@ -269,7 +269,7 @@
                       ${badgeEstadoPago(p.estado_pago)}
                       ${puedeEditar ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-monto-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
                     </td>
-                    <td style="white-space:normal;">${p.descripcion || '—'}</td>
+                    <td style="white-space:normal;">${p.descripcion ? escapeHtml(p.descripcion) : '—'}</td>
                   </tr>
                 `).join('')}
               </tbody>

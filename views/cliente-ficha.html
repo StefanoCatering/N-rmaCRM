@@ -151,10 +151,10 @@
 
       document.getElementById('ficha-cont').innerHTML = `
         <div class="cliente-header-card">
-          <div class="cliente-avatar">${initials(c.nombre_completo)}</div>
+          <div class="cliente-avatar">${escapeHtml(initials(c.nombre_completo))}</div>
           <div style="flex:1;min-width:200px;">
-            <div class="cliente-nombre">${c.nombre_completo}</div>
-            <div class="cliente-sub">${SEGMENTO_LABEL[c.segmento]}${c.empresa ? ' · ' + c.empresa : ''} · ${CANAL_LABEL[c.canal_origen]}${c.codigo_embajador ? ' · ' + c.codigo_embajador : ''}</div>
+            <div class="cliente-nombre">${escapeHtml(c.nombre_completo)}</div>
+            <div class="cliente-sub">${SEGMENTO_LABEL[c.segmento]}${c.empresa ? ' · ' + escapeHtml(c.empresa) : ''} · ${CANAL_LABEL[c.canal_origen]}${c.codigo_embajador ? ' · ' + escapeHtml(c.codigo_embajador) : ''}</div>
           </div>
           <div>${badgeEstado(c.estado)}</div>
         </div>
@@ -167,19 +167,19 @@
 
         ${c.observaciones ? `
           <div class="alerta-banner">
-            ⚠️ Observaciones: ${c.observaciones}
+            ⚠️ Observaciones: ${escapeHtml(c.observaciones)}
           </div>
         ` : ''}
 
         <div class="card">
           <div class="card-title">datos del cliente</div>
           <div class="cliente-info-grid">
-            <div class="cliente-info-item"><span class="form-label">Cédula</span><div class="cliente-info-value">${c.cedula}</div></div>
-            ${c.empresa ? `<div class="cliente-info-item"><span class="form-label">Empresa</span><div class="cliente-info-value">${c.empresa}</div></div>` : ''}
-            <div class="cliente-info-item"><span class="form-label">Email</span><div class="cliente-info-value">${c.email || '—'}</div></div>
-            <div class="cliente-info-item"><span class="form-label">Teléfono${c.telefono2 || c.telefono3 ? ' 1' : ''}</span><div class="cliente-info-value">${c.telefono || '—'}</div></div>
-            ${c.telefono2 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 2</span><div class="cliente-info-value">${c.telefono2}</div></div>` : ''}
-            ${c.telefono3 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 3</span><div class="cliente-info-value">${c.telefono3}</div></div>` : ''}
+            <div class="cliente-info-item"><span class="form-label">Cédula</span><div class="cliente-info-value">${escapeHtml(c.cedula)}</div></div>
+            ${c.empresa ? `<div class="cliente-info-item"><span class="form-label">Empresa</span><div class="cliente-info-value">${escapeHtml(c.empresa)}</div></div>` : ''}
+            <div class="cliente-info-item"><span class="form-label">Email</span><div class="cliente-info-value">${c.email ? escapeHtml(c.email) : '—'}</div></div>
+            <div class="cliente-info-item"><span class="form-label">Teléfono${c.telefono2 || c.telefono3 ? ' 1' : ''}</span><div class="cliente-info-value">${c.telefono ? escapeHtml(c.telefono) : '—'}</div></div>
+            ${c.telefono2 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 2</span><div class="cliente-info-value">${escapeHtml(c.telefono2)}</div></div>` : ''}
+            ${c.telefono3 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 3</span><div class="cliente-info-value">${escapeHtml(c.telefono3)}</div></div>` : ''}
             <div class="cliente-info-item"><span class="form-label">Fecha de ingreso</span><div class="cliente-info-value">${fmtFecha(c.fecha_ingreso)}</div></div>
           </div>
           ${puedeEscribir || esAdmin ? `
@@ -197,8 +197,8 @@
                 <div class="cliente-info-item">
                   <span class="form-label">Ubicación ${i + 1}</span>
                   <div class="cliente-info-value">
-                    ${u.direccion || '—'}${u.zona ? ' · ' + u.zona : ''}
-                    ${u.referencia ? `<div class="nota mt-8">${u.referencia}</div>` : ''}
+                    ${u.direccion ? escapeHtml(u.direccion) : '—'}${u.zona ? ' · ' + escapeHtml(u.zona) : ''}
+                    ${u.referencia ? `<div class="nota mt-8">${escapeHtml(u.referencia)}</div>` : ''}
                   </div>
                 </div>
               `).join('')}
@@ -208,7 +208,7 @@
 
         ${c.empresa ? `
         <div class="card">
-          <div class="card-title">colaboradores de ${c.empresa}</div>
+          <div class="card-title">colaboradores de ${escapeHtml(c.empresa)}</div>
           ${colaboradores.length ? `
             <div class="table-wrap">
               <table>
@@ -216,8 +216,8 @@
                 <tbody>
                   ${colaboradores.map(col => `
                     <tr>
-                      <td><strong>${col.nombre_completo}</strong></td>
-                      <td>${col.cedula}</td>
+                      <td><strong>${escapeHtml(col.nombre_completo)}</strong></td>
+                      <td>${escapeHtml(col.cedula)}</td>
                       <td>${badgeEstado(col.estado)}</td>
                       <td><a href="/clientes/${col.id}" class="btn-secondary">Ver ficha</a></td>
                     </tr>
@@ -225,7 +225,7 @@
                 </tbody>
               </table>
             </div>
-          ` : `<div class="empty-state">No hay otros colaboradores registrados de ${c.empresa}.</div>`}
+          ` : `<div class="empty-state">No hay otros colaboradores registrados de ${escapeHtml(c.empresa)}.</div>`}
           <a href="/clientes?empresa=${encodeURIComponent(c.empresa)}" class="nota mt-8" style="display:inline-block;">Ver todos los clientes de esta empresa →</a>
         </div>
         ` : ''}
@@ -272,8 +272,8 @@
                       <td>${p.medio_pago ? MEDIO_PAGO_LABEL[p.medio_pago] : '—'}</td>
                       <td>${p.tipo_vianda ? TIPO_VIANDA_LABEL[p.tipo_vianda] : '—'}</td>
                       <td style="white-space:normal;">
-                        ${p.descripcion || '—'}
-                        ${p.detalle_modificacion ? `<div class="nota mt-8" style="margin-bottom:0;">Modificación: ${p.detalle_modificacion}</div>` : ''}
+                        ${p.descripcion ? escapeHtml(p.descripcion) : '—'}
+                        ${p.detalle_modificacion ? `<div class="nota mt-8" style="margin-bottom:0;">Modificación: ${escapeHtml(p.detalle_modificacion)}</div>` : ''}
                         ${(p.fecha_entrega_desde || p.fecha_entrega_hasta) ? `<div class="text-muted" style="font-size:9px;margin-top:4px;">Entrega: ${p.fecha_entrega_desde ? fmtFecha(p.fecha_entrega_desde) : '—'} a ${p.fecha_entrega_hasta ? fmtFecha(p.fecha_entrega_hasta) : '—'}</div>` : ''}
                       </td>
                     </tr>
