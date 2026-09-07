@@ -115,7 +115,7 @@ a { color: inherit; }
 /* ══════════════════════════════════════════════════════
    APP / NAV
    ══════════════════════════════════════════════════════ */
-.app { max-width: 1080px; margin: 0 auto; min-height: 100vh; position: relative; }
+.app { max-width: 1440px; margin: 0 auto; min-height: 100vh; position: relative; }
 .nav {
   display: flex; align-items: center; gap: 5px;
   padding: 10px 14px; background: var(--navy);
@@ -162,7 +162,7 @@ a { color: inherit; }
 /* ══════════════════════════════════════════════════════
    METRICS
    ══════════════════════════════════════════════════════ */
-.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .metric { border-radius: var(--radius-lg); padding: 14px; position: relative; overflow: hidden; }
 .metric::after {
   content: ''; position: absolute; bottom: -12px; right: -12px;
