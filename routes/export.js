@@ -55,7 +55,7 @@ async function exportarPedidos(req, res) {
   const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
   const ESTADOS_PAGO = ['pagado', 'pendiente', 'parcial'];
   const TIPOS_VIANDA_FILTRO = ['economico', 'saludable', 'low_carb', 'modificacion_menu', 'sin_vianda'];
-  const SEGMENTOS = ['particular', 'empresa'];
+  const SEGMENTOS = ['particular', 'empresa', 'embajador'];
   const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 
   const where = ['p.cancelado = false'];
