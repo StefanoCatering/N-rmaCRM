@@ -65,6 +65,56 @@
     </div>
   </div>
 
+  <!-- Modal editar pedido (solo admin) -->
+  <div id="modal-editar-pedido" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:360px;width:100%;">
+      <div class="card-title">editar pedido</div>
+      <div class="form-group">
+        <label class="form-label">Monto (Gs.)</label>
+        <input type="number" id="modal-editar-monto" step="1" min="1"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Fecha de pedido</label>
+        <input type="date" id="modal-editar-fecha"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tipo de vianda</label>
+        <select id="modal-editar-tipo-vianda">
+          <option value="">— No especifica —</option>
+          <option value="economico">Económico</option>
+          <option value="saludable">Saludable</option>
+          <option value="low_carb">Low Carb</option>
+          <option value="modificacion_menu">Modificación de menú</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Motivo</label>
+        <textarea id="modal-editar-motivo" placeholder="Motivo de la edición..."></textarea>
+      </div>
+      <div id="modal-editar-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-editar-guardar">Guardar</button>
+        <button class="btn-secondary" id="modal-editar-cerrar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal cancelar pedido (solo admin) -->
+  <div id="modal-cancelar-pedido" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:360px;width:100%;">
+      <div class="card-title">cancelar pedido</div>
+      <div class="form-group">
+        <label class="form-label">Motivo</label>
+        <textarea id="modal-cancelar-motivo" placeholder="Motivo de la cancelación..."></textarea>
+      </div>
+      <div id="modal-cancelar-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-cancelar-confirmar">Confirmar cancelación</button>
+        <button class="btn-secondary" id="modal-cancelar-cerrar">Volver</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/js/common.js"></script>
   <script>
     const clienteId = window.location.pathname.split('/').pop();
@@ -85,9 +135,21 @@
       });
       document.getElementById('modal-pago-estado').addEventListener('change', toggleModalPagoMonto);
       document.getElementById('modal-pago-guardar').addEventListener('click', guardarPago);
+
+      document.getElementById('modal-editar-cerrar').addEventListener('click', () => {
+        document.getElementById('modal-editar-pedido').classList.add('hidden');
+      });
+      document.getElementById('modal-editar-guardar').addEventListener('click', guardarEdicionPedido);
+
+      document.getElementById('modal-cancelar-cerrar').addEventListener('click', () => {
+        document.getElementById('modal-cancelar-pedido').classList.add('hidden');
+      });
+      document.getElementById('modal-cancelar-confirmar').addEventListener('click', confirmarCancelarPedido);
     })();
 
     let pedidoEditando = null;
+    let pedidoEditandoDatos = null;
+    let pedidoCancelandoId = null;
 
     function toggleModalPagoMonto() {
       const esParcial = document.getElementById('modal-pago-estado').value === 'parcial';
@@ -123,6 +185,88 @@
       try {
         await api(`/api/pedidos/${pedidoEditando.id}/pago`, { method: 'PATCH', body });
         document.getElementById('modal-pago').classList.add('hidden');
+        await cargarFicha();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function abrirModalEditarPedido(ds) {
+      pedidoEditandoDatos = {
+        id: Number(ds.id),
+        monto: Number(ds.monto),
+        fecha_pedido: ds.fecha,
+        tipo_vianda: ds.tipoVianda || '',
+      };
+      document.getElementById('modal-editar-monto').value = pedidoEditandoDatos.monto;
+      document.getElementById('modal-editar-fecha').value = pedidoEditandoDatos.fecha_pedido;
+      document.getElementById('modal-editar-tipo-vianda').value = pedidoEditandoDatos.tipo_vianda;
+      document.getElementById('modal-editar-motivo').value = '';
+      document.getElementById('modal-editar-error').classList.add('hidden');
+      document.getElementById('modal-editar-pedido').classList.remove('hidden');
+    }
+
+    async function guardarEdicionPedido() {
+      const errorBox = document.getElementById('modal-editar-error');
+      const btn = document.getElementById('modal-editar-guardar');
+      errorBox.classList.add('hidden');
+
+      const motivo = document.getElementById('modal-editar-motivo').value.trim();
+      if (!motivo) {
+        errorBox.textContent = 'El motivo es requerido.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      const montoStr = document.getElementById('modal-editar-monto').value.trim();
+      const fecha = document.getElementById('modal-editar-fecha').value;
+      const tipoVianda = document.getElementById('modal-editar-tipo-vianda').value;
+
+      const body = { motivo };
+      const montoNum = parseInt(montoStr, 10);
+      if (montoStr && montoNum !== pedidoEditandoDatos.monto) body.monto = montoNum;
+      if (fecha && fecha !== pedidoEditandoDatos.fecha_pedido) body.fecha_pedido = fecha;
+      if (tipoVianda && tipoVianda !== pedidoEditandoDatos.tipo_vianda) body.tipo_vianda = tipoVianda;
+
+      btn.disabled = true;
+      try {
+        await api(`/api/pedidos/${pedidoEditandoDatos.id}`, { method: 'PATCH', body });
+        document.getElementById('modal-editar-pedido').classList.add('hidden');
+        await cargarFicha();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function abrirModalCancelarPedido(id) {
+      pedidoCancelandoId = Number(id);
+      document.getElementById('modal-cancelar-motivo').value = '';
+      document.getElementById('modal-cancelar-error').classList.add('hidden');
+      document.getElementById('modal-cancelar-pedido').classList.remove('hidden');
+    }
+
+    async function confirmarCancelarPedido() {
+      const motivo = document.getElementById('modal-cancelar-motivo').value.trim();
+      const errorBox = document.getElementById('modal-cancelar-error');
+      const btn = document.getElementById('modal-cancelar-confirmar');
+      errorBox.classList.add('hidden');
+
+      if (!motivo) {
+        errorBox.textContent = 'El motivo es requerido.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      try {
+        await api(`/api/pedidos/${pedidoCancelandoId}/cancelar`, { method: 'PATCH', body: { motivo } });
+        document.getElementById('modal-cancelar-pedido').classList.add('hidden');
         await cargarFicha();
       } catch (e) {
         errorBox.textContent = e.message;
@@ -258,16 +402,18 @@
           ${pedidos.length ? `
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Monto</th><th>Pagado</th><th>Estado pago</th><th>Medio de pago</th><th>Tipo de vianda</th><th>Descripción</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Monto</th><th>Pagado</th><th>Estado pago</th><th>Medio de pago</th><th>Tipo de vianda</th><th>Descripción</th>${esAdmin ? '<th>Acciones</th>' : ''}</tr></thead>
                 <tbody>
                   ${pedidos.map(p => `
-                    <tr>
+                    <tr${p.cancelado ? ' style="opacity:0.55;"' : ''}>
                       <td>${fmtFecha(p.fecha_pedido)}</td>
                       <td><strong>${fmtGs(p.monto)}</strong></td>
                       <td>${p.monto_pagado !== null && p.monto_pagado !== undefined ? fmtGs(p.monto_pagado) : '—'}</td>
                       <td style="white-space:nowrap;">
-                        ${badgeEstadoPago(p.estado_pago)}
-                        ${puedeEscribir ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>` : ''}
+                        ${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : `
+                          ${badgeEstadoPago(p.estado_pago)}
+                          ${puedeEscribir ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>`
+                        : ''}`}
                       </td>
                       <td>${p.medio_pago ? MEDIO_PAGO_LABEL[p.medio_pago] : '—'}</td>
                       <td>${p.tipo_vianda ? TIPO_VIANDA_LABEL[p.tipo_vianda] : '—'}</td>
@@ -276,6 +422,12 @@
                         ${p.detalle_modificacion ? `<div class="nota mt-8" style="margin-bottom:0;">Modificación: ${escapeHtml(p.detalle_modificacion)}</div>` : ''}
                         ${(p.fecha_entrega_desde || p.fecha_entrega_hasta) ? `<div class="text-muted" style="font-size:9px;margin-top:4px;">Entrega: ${p.fecha_entrega_desde ? fmtFecha(p.fecha_entrega_desde) : '—'} a ${p.fecha_entrega_hasta ? fmtFecha(p.fecha_entrega_hasta) : '—'}</div>` : ''}
                       </td>
+                      ${esAdmin ? `<td style="white-space:nowrap;">
+                        ${!p.cancelado ? `
+                          <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
+                          <button class="btn-secondary btn-cancelar-pedido" data-id="${p.id}" style="padding:2px 8px;font-size:9px;margin-left:4px;">Cancelar</button>
+                        ` : ''}
+                      </td>` : ''}
                     </tr>
                   `).join('')}
                 </tbody>
@@ -296,6 +448,12 @@
 
       document.querySelectorAll('.btn-editar-pago').forEach(btn => {
         btn.addEventListener('click', () => abrirModalPago(btn.dataset));
+      });
+      document.querySelectorAll('.btn-editar-pedido').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalEditarPedido(btn.dataset));
+      });
+      document.querySelectorAll('.btn-cancelar-pedido').forEach(btn => {
+        btn.addEventListener('click', () => abrirModalCancelarPedido(btn.dataset.id));
       });
     }
 
