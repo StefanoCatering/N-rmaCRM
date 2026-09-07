@@ -17,6 +17,12 @@ function requireEscritura(req, res, next) {
   next();
 }
 
+// Solo admin puede editar/cancelar pedidos
+function requireAdmin(req, res, next) {
+  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
+  next();
+}
+
 // GET /api/pedidos — historial de pedidos con filtros (admin y operador)
 router.get('/', async (req, res, next) => {
   try {
@@ -139,6 +145,77 @@ router.patch('/:id/pago', requireEscritura, async (req, res, next) => {
 
     const actualizado = await pedidos.updatePago(id, estado_pago, monto_pagado);
     res.json({ pedido: actualizado });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/pedidos/:id — editar campos clave de un pedido (solo admin, con motivo obligatorio)
+router.patch('/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pedido = id ? await pedidos.getById(id) : null;
+    if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+    if (pedido.cancelado) return res.status(400).json({ error: 'No se puede editar un pedido cancelado' });
+
+    const body = req.body || {};
+    const motivo = String(body.motivo || '').trim();
+    if (!motivo) return res.status(400).json({ error: 'El motivo es requerido' });
+
+    const CAMPOS_EDITABLES = ['monto', 'fecha_pedido', 'tipo_vianda'];
+    const provistos = CAMPOS_EDITABLES.filter(campo => body[campo] !== undefined);
+    if (!provistos.length) {
+      return res.status(400).json({ error: 'Debe indicar al menos un campo a modificar (monto, fecha_pedido o tipo_vianda)' });
+    }
+
+    const cambios = {};
+    const errores = [];
+
+    if (provistos.includes('monto')) {
+      const monto = Number(body.monto);
+      if (!Number.isInteger(monto) || monto <= 0) errores.push('El monto debe ser un número entero positivo (en guaraníes)');
+      else cambios.monto = monto;
+    }
+    if (provistos.includes('fecha_pedido')) {
+      const fecha_pedido = String(body.fecha_pedido || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha_pedido)) errores.push('Fecha de pedido inválida (formato YYYY-MM-DD)');
+      else cambios.fecha_pedido = fecha_pedido;
+    }
+    if (provistos.includes('tipo_vianda')) {
+      const tipo_vianda = String(body.tipo_vianda || '').trim();
+      if (!TIPOS_VIANDA.includes(tipo_vianda)) errores.push('Tipo de vianda inválido');
+      else cambios.tipo_vianda = tipo_vianda;
+    }
+
+    if (errores.length) return res.status(400).json({ error: errores.join('. ') });
+
+    const actualizado = await pedidos.update(id, pedido, cambios, req.user.username, motivo);
+    res.json({ pedido: actualizado });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/pedidos/:id/cancelar — cancelar un pedido (solo admin, con motivo obligatorio)
+router.patch('/:id/cancelar', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const pedido = id ? await pedidos.getById(id) : null;
+    if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+    if (pedido.cancelado) return res.status(400).json({ error: 'Este pedido ya está cancelado' });
+
+    const motivo = String((req.body || {}).motivo || '').trim();
+    if (!motivo) return res.status(400).json({ error: 'El motivo es requerido' });
+
+    const actualizado = await pedidos.cancelar(id, req.user.username, motivo);
+    res.json({ pedido: actualizado });
+  } catch (err) { next(err); }
+});
+
+// GET /api/pedidos/:id/auditoria — historial de ediciones/cancelaciones (cualquier usuario autenticado)
+router.get('/:id/auditoria', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Id de pedido inválido' });
+    res.json({ auditoria: await pedidos.listAuditoria(id) });
   } catch (err) { next(err); }
 });
 

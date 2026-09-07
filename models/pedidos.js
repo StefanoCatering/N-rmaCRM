@@ -22,6 +22,61 @@ async function updatePago(id, estado_pago, monto_pagado) {
   return result.rows[0] || null;
 }
 
+// Actualiza campos editables de un pedido (monto, fecha_pedido, tipo_vianda) y registra
+// en pedidos_auditoria el detalle de los campos que efectivamente cambiaron.
+// pedidoActual: fila de pedidos antes del cambio (para armar el detalle anterior/nuevo).
+// cambios: objeto solo con los campos provistos en el request.
+async function update(id, pedidoActual, cambios, usuario, motivo) {
+  const campos = Object.keys(cambios);
+  const sets = campos.map((campo, i) => `${campo} = $${i + 1}`);
+  const params = campos.map(campo => cambios[campo]);
+  params.push(id);
+
+  const result = await pool.query(
+    `UPDATE pedidos SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+  const actualizado = result.rows[0];
+
+  const detalle = {};
+  for (const campo of campos) {
+    detalle[campo] = { anterior: pedidoActual[campo], nuevo: cambios[campo] };
+  }
+  await pool.query(
+    `INSERT INTO pedidos_auditoria (pedido_id, accion, usuario, detalle, motivo)
+     VALUES ($1, 'edicion', $2, $3, $4)`,
+    [id, usuario, JSON.stringify(detalle), motivo]
+  );
+
+  return actualizado;
+}
+
+// Marca un pedido como cancelado y registra la auditoría (sin detalle de campos).
+async function cancelar(id, usuario, motivo) {
+  const result = await pool.query(
+    `UPDATE pedidos SET cancelado = true WHERE id = $1 RETURNING *`,
+    [id]
+  );
+  const actualizado = result.rows[0];
+
+  await pool.query(
+    `INSERT INTO pedidos_auditoria (pedido_id, accion, usuario, detalle, motivo)
+     VALUES ($1, 'cancelacion', $2, NULL, $3)`,
+    [id, usuario, motivo]
+  );
+
+  return actualizado;
+}
+
+// Historial de auditoría (ediciones y cancelaciones) de un pedido, más reciente primero.
+async function listAuditoria(pedidoId) {
+  const result = await pool.query(
+    `SELECT * FROM pedidos_auditoria WHERE pedido_id = $1 ORDER BY fecha DESC`,
+    [pedidoId]
+  );
+  return result.rows;
+}
+
 // Historial de pedidos con filtros (vista de pedidos para admin/operador).
 // filtros: { cliente_id, fecha_desde, fecha_hasta, estado, estado_pago, tipo_vianda,
 //            segmento, canal_origen } — todos opcionales.
@@ -51,7 +106,7 @@ async function listFiltered({
 
   const sql = `
     SELECT
-      p.id, p.fecha_pedido, p.monto, p.monto_pagado, p.descripcion, p.estado_pago, p.tipo_vianda,
+      p.id, p.fecha_pedido, p.monto, p.monto_pagado, p.descripcion, p.estado_pago, p.tipo_vianda, p.cancelado,
       c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen
     FROM pedidos p
     JOIN clientes c ON c.id = p.cliente_id
@@ -157,4 +212,5 @@ async function create({
 module.exports = {
   listByCliente, getById, create, listFiltered, updatePago,
   countRecepcionadas, countEntregadas, countCortesia, viandasPorTipoPorSemana,
+  update, cancelar, listAuditoria,
 };
