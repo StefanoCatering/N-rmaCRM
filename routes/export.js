@@ -48,10 +48,15 @@ function autoWidth(worksheet) {
 
 // GET /api/export?tipo=pedidos — exporta solo la hoja "Pedidos" filtrada
 // (vista de historial de pedidos para admin/operador).
-// Parámetros: cliente_id, fecha_desde, fecha_hasta, estado (estado del cliente).
+// Parámetros: cliente_id, fecha_desde, fecha_hasta, estado (estado del cliente),
+// estado_pago y tipo_vianda (de pedidos), segmento y canal_origen (de clientes).
 async function exportarPedidos(req, res) {
-  const { cliente_id, fecha_desde, fecha_hasta, estado } = req.query;
+  const { cliente_id, fecha_desde, fecha_hasta, estado, estado_pago, tipo_vianda, segmento, canal_origen } = req.query;
   const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
+  const ESTADOS_PAGO = ['pagado', 'pendiente', 'parcial'];
+  const TIPOS_VIANDA_FILTRO = ['economico', 'saludable', 'low_carb', 'modificacion_menu', 'sin_vianda'];
+  const SEGMENTOS = ['particular', 'empresa'];
+  const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 
   const where = ['p.cancelado = false'];
   const params = [];
@@ -61,6 +66,15 @@ async function exportarPedidos(req, res) {
   if (fecha_desde)                      { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
   if (fecha_hasta)                      { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
   if (estado && ESTADOS_CLIENTE.includes(estado)) { where.push(`c.estado = $${idx++}`); params.push(estado); }
+  if (estado_pago && ESTADOS_PAGO.includes(estado_pago)) { where.push(`p.estado_pago = $${idx++}`); params.push(estado_pago); }
+  if (segmento && SEGMENTOS.includes(segmento)) { where.push(`c.segmento = $${idx++}`); params.push(segmento); }
+  if (canal_origen && CANALES.includes(canal_origen)) { where.push(`c.canal_origen = $${idx++}`); params.push(canal_origen); }
+  if (tipo_vianda === 'sin_vianda') {
+    where.push('p.tipo_vianda IS NULL');
+  } else if (tipo_vianda && TIPOS_VIANDA_FILTRO.includes(tipo_vianda)) {
+    where.push(`p.tipo_vianda = $${idx++}`);
+    params.push(tipo_vianda);
+  }
 
   const { rows: pedidos } = await pool.query(`
     SELECT c.nombre_completo, c.cedula, p.fecha_pedido, p.monto, p.descripcion
