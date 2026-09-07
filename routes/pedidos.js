@@ -17,11 +17,6 @@ function requireEscritura(req, res, next) {
   next();
 }
 
-function requireAdmin(req, res, next) {
-  if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
-  next();
-}
-
 // GET /api/pedidos — historial de pedidos con filtros (admin y operador)
 router.get('/', async (req, res, next) => {
   try {
