@@ -153,6 +153,7 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       pedidos_recepcionados,
       viandas_entregadas,
       cortesias,
+      viandas_por_tipo_semana,
     ] = await Promise.all([
       clientes.countActivos(),
       clientes.countAlertas(),
@@ -164,6 +165,7 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       pedidos.countRecepcionadas(fecha_desde, fecha_hasta),
       pedidos.countEntregadas(fecha_desde, fecha_hasta),
       pedidos.countCortesia(fecha_desde, fecha_hasta),
+      pedidos.viandasPorTipoPorSemana(fecha_desde, fecha_hasta),
     ]);
     res.json({
       total_activos,
@@ -176,6 +178,7 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
       pedidos_recepcionados,
       viandas_entregadas,
       cortesias,
+      viandas_por_tipo_semana,
       fecha_desde,
       fecha_hasta,
       alert_days: ALERT_DAYS,

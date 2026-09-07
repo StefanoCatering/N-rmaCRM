@@ -100,6 +100,33 @@ async function countCortesia(fecha_desde, fecha_hasta) {
   return r.rows[0].n;
 }
 
+// Cantidad de pedidos por semana (lunes ISO) y tipo_vianda, dentro del rango
+// [fecha_desde, fecha_hasta]. Deja afuera modificacion_menu y pedidos sin
+// vianda (tipo_vianda IS NULL). Devuelve una fila por semana con datos, con
+// los 3 conteos por tipo (0 si esa semana no tuvo pedidos de ese tipo).
+async function viandasPorTipoPorSemana(fecha_desde, fecha_hasta) {
+  const rows = (await pool.query(`
+    SELECT
+      to_char(date_trunc('week', fecha_pedido), 'YYYY-MM-DD') AS semana,
+      tipo_vianda,
+      COUNT(*)::integer AS cantidad
+    FROM pedidos
+    WHERE tipo_vianda IN ('economico', 'saludable', 'low_carb')
+      AND fecha_pedido >= $1 AND fecha_pedido <= $2
+    GROUP BY date_trunc('week', fecha_pedido), tipo_vianda
+  `, [fecha_desde, fecha_hasta])).rows;
+
+  const porSemana = new Map();
+  for (const r of rows) {
+    if (!porSemana.has(r.semana)) {
+      porSemana.set(r.semana, { semana: r.semana, economico: 0, saludable: 0, low_carb: 0 });
+    }
+    porSemana.get(r.semana)[r.tipo_vianda] = r.cantidad;
+  }
+
+  return [...porSemana.values()].sort((a, b) => a.semana.localeCompare(b.semana));
+}
+
 async function create({
   cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
   fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion,
@@ -129,5 +156,5 @@ async function create({
 
 module.exports = {
   listByCliente, getById, create, listFiltered, updatePago,
-  countRecepcionadas, countEntregadas, countCortesia,
+  countRecepcionadas, countEntregadas, countCortesia, viandasPorTipoPorSemana,
 };

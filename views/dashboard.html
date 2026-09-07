@@ -39,6 +39,11 @@
         <div class="card-title">ticket promedio por segmento</div>
         <div class="metric-grid" id="ticket-segmento"></div>
       </div>
+
+      <div class="card">
+        <div class="card-title">viandas por tipo, por semana</div>
+        <div id="chart-viandas-tipo"><div class="empty-state">Cargando...</div></div>
+      </div>
     </div>
   </div>
 
@@ -118,6 +123,7 @@
       `;
 
       renderEvolucion(k.evolucion_activos);
+      renderViandasPorTipo(k.viandas_por_tipo_semana);
     }
 
     function renderEvolucion(serie) {
@@ -137,6 +143,43 @@
             <div class="chart-bar-label">${MESES[parseInt(m, 10) - 1]}</div>
           </div>`;
       }).join('')}</div>`;
+    }
+
+    const TIPO_VIANDA_COLOR = { economico: 'var(--yellow)', saludable: 'var(--green)', low_carb: 'var(--navy2)' };
+    const TIPO_VIANDA_ORDEN = ['economico', 'saludable', 'low_carb'];
+
+    function renderViandasPorTipo(semanas) {
+      const cont = document.getElementById('chart-viandas-tipo');
+      if (!semanas.length) { cont.innerHTML = '<div class="empty-state">Sin datos suficientes en el rango seleccionado.</div>'; return; }
+
+      const max = Math.max(1, ...semanas.flatMap(s => TIPO_VIANDA_ORDEN.map(t => s[t])));
+
+      const legend = `
+        <div class="chart-legend">
+          <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:${TIPO_VIANDA_COLOR.economico};"></span>${TIPO_VIANDA_LABEL.economico}</div>
+          <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:${TIPO_VIANDA_COLOR.saludable};"></span>${TIPO_VIANDA_LABEL.saludable}</div>
+          <div class="chart-legend-item"><span class="chart-legend-swatch" style="background:${TIPO_VIANDA_COLOR.low_carb};"></span>${TIPO_VIANDA_LABEL.low_carb}</div>
+        </div>`;
+
+      const grupos = semanas.map(s => {
+        const [y, m, d] = s.semana.split('-');
+        const barras = TIPO_VIANDA_ORDEN.map(t => {
+          const valor = s[t] || 0;
+          const alto = Math.max(4, Math.round((valor / max) * 100));
+          return `
+            <div class="chart-mini-bar-col">
+              <div class="chart-mini-bar-value">${valor || ''}</div>
+              <div class="chart-mini-bar" style="height:${alto}px;background:${TIPO_VIANDA_COLOR[t]};"></div>
+            </div>`;
+        }).join('');
+        return `
+          <div class="chart-group">
+            <div class="chart-group-bars">${barras}</div>
+            <div class="chart-group-label">${d}/${m}</div>
+          </div>`;
+      }).join('');
+
+      cont.innerHTML = legend + `<div class="chart-bars-grouped">${grupos}</div>`;
     }
   </script>
 </body>
