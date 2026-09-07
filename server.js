@@ -69,7 +69,7 @@ function requireAuth(rol) {
       next();
     } catch (e) {
       console.log('[requireAuth] token inválido:', e.message, '| path:', req.originalUrl);
-      res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
+      res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'lax' });
       if (isApi) return res.status(401).json({ error: 'No autenticado' });
       return res.redirect('/login');
     }
@@ -101,7 +101,7 @@ app.post('/api/login', async (req, res, next) => {
     res.cookie('narma_token', token, {
       httpOnly: true,
       secure: true,
-      sameSite: 'none',
+      sameSite: 'lax',
       maxAge: 8 * 60 * 60 * 1000, // 8 horas
     });
 
@@ -112,7 +112,7 @@ app.post('/api/login', async (req, res, next) => {
 });
 
 app.post('/api/logout', (req, res) => {
-  res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
+  res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'lax' });
   res.json({ ok: true });
 });
 
@@ -129,7 +129,7 @@ app.get('/', (req, res) => {
     const payload = jwt.verify(token, JWT_SECRET);
     return res.redirect((payload.rol === 'admin' || payload.rol === 'visor') ? '/dashboard' : '/inicio');
   } catch {
-    res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'none' });
+    res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'lax' });
     return res.redirect('/login');
   }
 });
