@@ -8,7 +8,7 @@ const MEDIOS_PAGO = ['efectivo', 'transferencia', 'tarjeta', 'pos', 'cortesia'];
 const ESTADOS_PAGO = ['pagado', 'pendiente', 'parcial'];
 const TIPOS_VIANDA = ['economico', 'saludable', 'low_carb', 'modificacion_menu'];
 const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
-const SEGMENTOS = ['particular', 'empresa'];
+const SEGMENTOS = ['particular', 'empresa', 'embajador'];
 const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 const TIPOS_VIANDA_FILTRO = [...TIPOS_VIANDA, 'sin_vianda']; // filtro de listado acepta también "sin vianda"
 
