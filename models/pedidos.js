@@ -123,6 +123,7 @@ async function countRecepcionadas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE tipo_vianda IS NOT NULL
+      AND cancelado = false
       AND fecha_pedido >= $1 AND fecha_pedido <= $2
   `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
@@ -137,6 +138,7 @@ async function countEntregadas(fecha_desde, fecha_hasta) {
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE fecha_entrega_desde IS NOT NULL
       AND fecha_entrega_hasta IS NOT NULL
+      AND cancelado = false
       AND fecha_entrega_desde <= $2
       AND fecha_entrega_hasta >= $1
   `, [fecha_desde, fecha_hasta]);
@@ -150,6 +152,7 @@ async function countCortesia(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT COUNT(*)::integer AS n FROM pedidos
     WHERE medio_pago = 'cortesia'
+      AND cancelado = false
       AND fecha_pedido >= $1 AND fecha_pedido <= $2
   `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
@@ -167,6 +170,7 @@ async function viandasPorTipoPorSemana(fecha_desde, fecha_hasta) {
       COUNT(*)::integer AS cantidad
     FROM pedidos
     WHERE tipo_vianda IN ('economico', 'saludable', 'low_carb')
+      AND cancelado = false
       AND fecha_pedido >= $1 AND fecha_pedido <= $2
     GROUP BY date_trunc('week', fecha_pedido), tipo_vianda
   `, [fecha_desde, fecha_hasta])).rows;

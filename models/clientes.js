@@ -210,7 +210,8 @@ async function countBajas(fecha_desde, fecha_hasta) {
 async function ticketPromedioGeneral(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT AVG(monto)::float AS prom FROM pedidos
-    WHERE fecha_pedido >= $1 AND fecha_pedido <= $2
+    WHERE cancelado = false
+      AND fecha_pedido >= $1 AND fecha_pedido <= $2
   `, [fecha_desde, fecha_hasta]);
   return r.rows[0].prom || 0;
 }
@@ -220,7 +221,8 @@ async function ticketPromedioPorSegmento(fecha_desde, fecha_hasta) {
     SELECT c.segmento AS segmento, AVG(pe.monto)::float AS prom
     FROM clientes c
     JOIN pedidos pe ON pe.cliente_id = c.id
-    WHERE pe.fecha_pedido >= $1 AND pe.fecha_pedido <= $2
+    WHERE pe.cancelado = false
+      AND pe.fecha_pedido >= $1 AND pe.fecha_pedido <= $2
     GROUP BY c.segmento
   `, [fecha_desde, fecha_hasta])).rows;
   const out = { particular: 0, empresa: 0 };

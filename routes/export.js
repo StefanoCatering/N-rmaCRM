@@ -53,7 +53,7 @@ async function exportarPedidos(req, res) {
   const { cliente_id, fecha_desde, fecha_hasta, estado } = req.query;
   const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
 
-  const where = [];
+  const where = ['p.cancelado = false'];
   const params = [];
   let idx = 1;
 
@@ -227,7 +227,7 @@ router.get('/', async (req, res, next) => {
     // ── Hoja "Pedidos" (solo tipo=historial) ───────────────────
     if (tipo === 'historial') {
       // Los filtros de pedidos = mismos filtros de cliente + rango de fechas opcional
-      const pedidosConds   = [...clienteConds];
+      const pedidosConds   = ['p.cancelado = false', ...clienteConds];
       const pedidosParams  = [...clienteParams];
       let   pn             = n;
 
