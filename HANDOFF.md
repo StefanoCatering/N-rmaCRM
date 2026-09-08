@@ -16,6 +16,7 @@
 | Hash de passwords | `bcrypt ^5.1.1` |
 | Export Excel | `exceljs ^4.4.0` |
 | Env | `dotenv ^16.4.5` |
+| Seguridad | `helmet ^8.3.0` (headers HTTP) |
 | Frontend | HTML + Vanilla JS (sin framework), CSS propio |
 | Hosting | Vercel (serverless, auto-deploy desde `main`) |
 
@@ -221,6 +222,7 @@ Legacy de connect-pg-simple (`sid`, `sess`, `expire`). **Ya no se usa** (se migr
 - Alinear `seed.js` con usuarios reales, o separar seed de demo vs. seed de usuarios.
 - Vista/gestión de usuarios desde la UI (hoy se crean solo por SQL/seed).
 - Dropear tabla `session` y limpiar `SESSION_SECRET`/`requireAdmin` muerto.
+- Mover los `<script>` inline de las 8 vistas a `public/js/` para poder sacar `'unsafe-inline'` de `script-src` en la CSP de helmet (ver sección 11).
 
 ---
 
@@ -236,6 +238,7 @@ Legacy de connect-pg-simple (`sid`, `sess`, `expire`). **Ya no se usa** (se migr
 - **CSS**: badges de pago `.badge-pago-{pagado|pendiente|parcial}`; métricas `.metric-{blue|green|orange|yellow|pink}`. `common.js` tiene los mapas de labels (`SEGMENTO_LABEL`, `CANAL_LABEL`, `MEDIO_PAGO_LABEL`, `TIPO_VIANDA_LABEL`, `ESTADO_PAGO_LABEL`).
 - **Migraciones SQL**: se aplican manualmente en el SQL Editor de Supabase (patrón idempotente: DROP constraint viejo si no incluye el valor nuevo, ADD el nuevo). El usuario las ejecuta; Claude no ejecuta DDL en prod.
 - **CRLF/LF**: git avisa `LF will be replaced by CRLF` en Windows — es normal, no rompe nada.
+- **Helmet / CSP (Fase 5)**: `helmet()` está montado en `server.js` con la CSP por defecto, salvo `script-src` que se relaja a `['self', 'unsafe-inline']`. Motivo: las 8 vistas en `views/` no tienen build step y cargan su lógica en un único `<script>` inline por página (hasta ~480 líneas, ej. `pedidos.html`, `cliente-ficha.html`) — con `script-src 'self'` (default de helmet) esas vistas quedan en blanco/rotas porque el navegador bloquea el bloque inline. El resto de la CSP por defecto de helmet queda intacta (`object-src 'none'`, `frame-ancestors 'self'`, `base-uri 'self'`, `form-action 'self'`, etc.), y `style-src`/`font-src` ya traen `'unsafe-inline'`/`https:` por default por lo que los `style="..."` inline y Google Fonts (`fonts.googleapis.com`/`fonts.gstatic.com`) siguen funcionando sin cambios. Verificado manualmente: `/login` carga y postea sin errores de consola con la CSP activa; el resto de las vistas comparten el mismo patrón (un único `<script>` inline, sin iframes/eval/workers/fetch a dominios externos) así que aplica el mismo razonamiento. **Backlog futuro**: mover los `<script>` inline a archivos en `public/js/` y volver a poner `script-src 'self'` (sin `unsafe-inline`) sería el hardening completo, pero es un refactor de ~2100 líneas repartidas en 8 vistas — fuera de alcance de esta fase de hardening no urgente.
 
 ---
 

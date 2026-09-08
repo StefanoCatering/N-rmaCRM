@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
@@ -26,6 +27,18 @@ const app = express();
 console.log('[server] NODE_ENV:', config.NODE_ENV);
 console.log('[server] JWT_SECRET configurado: true');
 console.log('[server] auth: JWT httpOnly cookie (narma_token)');
+
+// Headers de seguridad (helmet). CSP con script-src 'unsafe-inline':
+// las 8 vistas usan <script> inline (no hay build step) — ver decisión
+// documentada en HANDOFF.md antes de endurecer script-src.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'script-src': ["'self'", "'unsafe-inline'"],
+    },
+  },
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
