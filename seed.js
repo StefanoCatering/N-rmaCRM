@@ -57,10 +57,11 @@ async function migrateSchema() {
 
 async function seedUsuarios() {
   const usuarios = [
-    { username: 'NarmaAdmin', password: 'narma2025', rol: 'operador' },
-    { username: 'Stefano',    password: 'narma2025', rol: 'admin'    },
-    { username: 'Guadalupe',  password: 'narma2025', rol: 'admin'    },
-    { username: 'Direccion',  password: 'narma2025', rol: 'visor'    },
+    { username: 'Admin1',    password: 'narma2025', rol: 'operador' },
+    { username: 'Admin2',    password: 'narma2025', rol: 'operador' },
+    { username: 'Guadalupe', password: 'narma2025', rol: 'admin'    },
+    { username: 'Stefano',   password: 'narma2025', rol: 'admin'    },
+    { username: 'Direccion', password: 'narma2025', rol: 'visor'    },
   ];
 
   for (const u of usuarios) {

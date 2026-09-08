@@ -156,7 +156,7 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos por rol se aplic
 - `trust proxy` no aplica (ya no se usa express-session); las cookies secure funcionan porque Vercel es HTTPS.
 
 **Usuarios en producción** (verificado en DB): `Admin1` (operador), `Admin2` (operador), `Guadalupe` (admin), `Stefano` (admin), `Direccion` (visor).
-**⚠️ `seed.js` define un set distinto** (`NarmaAdmin`/operador, `Stefano`/admin, `Guadalupe`/admin, `Direccion`/visor) — no correr el seed contra producción sin revisar, difiere de los usuarios reales.
+`seed.js` usa los mismos 5 usernames y roles (contraseñas ficticias de desarrollo, no las reales) — es seguro usarlo como referencia de estructura, pero no correrlo contra producción (pisaría/duplicaría usuarios reales).
 
 ---
 
