@@ -16,7 +16,7 @@
 | Hash de passwords | `bcrypt ^5.1.1` |
 | Export Excel | `exceljs ^4.4.0` |
 | Env | `dotenv ^16.4.5` |
-| Seguridad | `helmet ^8.3.0` (headers HTTP) |
+| Seguridad | `helmet ^8.3.0` (headers HTTP), `express-rate-limit ^8.7.0` (rate limit en `/api/login`) |
 | Frontend | HTML + Vanilla JS (sin framework), CSS propio |
 | Hosting | Vercel (serverless, auto-deploy desde `main`) |
 
