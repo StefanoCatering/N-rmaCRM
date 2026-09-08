@@ -1,5 +1,7 @@
 const path = require('path');
 const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
@@ -22,10 +24,26 @@ if (!JWT_SECRET) {
 
 const app = express();
 
+// Vercel corre server.js detrás de su proxy/edge — sin esto, express-rate-limit
+// (y req.ip en general) verían siempre la IP interna del proxy, no la del cliente.
+app.set('trust proxy', 1);
+
 // ── Diagnóstico de arranque ───────────────────────────────────────
 console.log('[server] NODE_ENV:', config.NODE_ENV);
 console.log('[server] JWT_SECRET configurado: true');
 console.log('[server] auth: JWT httpOnly cookie (narma_token)');
+
+// Headers de seguridad (helmet). CSP con script-src 'unsafe-inline':
+// las 8 vistas usan <script> inline (no hay build step) — ver decisión
+// documentada en HANDOFF.md antes de endurecer script-src.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'script-src': ["'self'", "'unsafe-inline'"],
+    },
+  },
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -78,9 +96,19 @@ function requireAuth(rol) {
 
 const view = (name) => (req, res) => res.sendFile(path.join(__dirname, 'views', name));
 
+// Rate limiting solo para /api/login: limita intentos de fuerza bruta por IP
+// sin afectar al resto de la API.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  limit: 8,                 // intentos por IP en la ventana
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos de inicio de sesión. Probá de nuevo en unos minutos.' },
+});
+
 // ── Auth ──────────────────────────────────────────────────────────
 
-app.post('/api/login', async (req, res, next) => {
+app.post('/api/login', loginLimiter, async (req, res, next) => {
   try {
     const { username, password } = req.body || {};
     if (!username || !password) {
