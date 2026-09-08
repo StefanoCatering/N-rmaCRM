@@ -68,3 +68,5 @@ CREATE INDEX IF NOT EXISTS idx_clientes_estado     ON clientes(estado);
 CREATE INDEX IF NOT EXISTS idx_clientes_segmento   ON clientes(segmento);
 CREATE INDEX IF NOT EXISTS idx_clientes_empresa    ON clientes(empresa);
 CREATE INDEX IF NOT EXISTS idx_pedidos_auditoria_pedido_id ON pedidos_auditoria(pedido_id);
+CREATE INDEX IF NOT EXISTS idx_pedidos_estado_pago ON pedidos(estado_pago);
+CREATE INDEX IF NOT EXISTS idx_pedidos_tipo_vianda  ON pedidos(tipo_vianda);
