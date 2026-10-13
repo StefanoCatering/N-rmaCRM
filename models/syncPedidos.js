@@ -16,6 +16,38 @@
 // 3. Se sincroniza el pedido COMPLETO en cada cambio, no solo lo que se tocó.
 //    Es más tráfico, pero es auto-reparador: si un sync anterior falló o quedó
 //    a medias, el siguiente deja Pedidos consistente igual.
+//
+// ── Contrato con la tabla destino ────────────────────────────────
+// pedidos_crm_detalle NO la migra este repo: vive en el proyecto narma-pedidos
+// (ref rgppcvqoephcjjcnqwnz) y su DDL lo gestiona ese repo (creada en su PR #35).
+// Desde acá solo se la escribe. Si cambia allá, hay que acompañar el cambio acá.
+//
+// Forma que este módulo asume (verificada contra producción el 2026-10-13):
+//   id                    serial PK
+//   crm_pedido_id         integer  NOT NULL
+//   crm_pedido_detalle_id integer  NOT NULL
+//   crm_excepcion_id      integer  NULL
+//   cliente_nombre        text     NOT NULL
+//   segmento              text     NOT NULL
+//   tipo_envase           text     NOT NULL  CHECK ('Narma','Venezia')
+//   plato_nombre          text     NOT NULL
+//   cantidad              integer  NOT NULL  CHECK (cantidad > 0)
+//   fecha_entrega         date     NOT NULL
+//   ubicacion_direccion   text     NULL
+//   comentario            text     NULL
+//   cancelado             boolean  NOT NULL DEFAULT false
+//   actualizado_en        timestamptz NOT NULL DEFAULT now()
+//   UNIQUE (crm_pedido_detalle_id, fecha_entrega)  ← clave del upsert
+//
+// Las 5 columnas NOT NULL de arriba quedan siempre cubiertas desde el CRM:
+// nombre_completo y segmento son NOT NULL en clientes; tipo_envase es NOT NULL
+// DEFAULT 'Venezia' y su CHECK usa los mismos dos valores; cantidad sale de
+// pedido_detalle.cantidad (CHECK > 0) o de una excepción (CHECK > 0), y
+// resolverEntregas() solo toma la de la excepción cuando no es NULL; y
+// plato_nombre se resuelve por FK a platos, así que la búsqueda no falla.
+// Si alguna vez llegara un NULL, Postgres rechaza la fila y el intento cae en
+// sync_errores para que lo mire una persona — es el modo de falla correcto:
+// mejor eso que mandar a producción una fila a medias.
 
 const pool = require('./db');
 const { pool: pedidosPool, habilitado } = require('./dbPedidos');

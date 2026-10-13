@@ -14,8 +14,11 @@
 --   migrations/fase5_indices.sql
 -- Esta migración no depende de ellas, pero conviene correrlas en orden.
 --
--- La tabla pedidos_crm_detalle del proyecto narma-pedidos va aparte:
---   migrations/fase6_pedidos_crm_detalle.sql
+-- Esta es la ÚNICA migración de la fase 6, y va toda en la base del CRM.
+-- La tabla destino del sync (pedidos_crm_detalle) NO se crea desde este repo:
+-- vive en el proyecto narma-pedidos (ref rgppcvqoephcjjcnqwnz) y la gestiona
+-- ese repo, que ya la creó en su PR #35. Desde acá solo se la escribe
+-- (models/syncPedidos.js), nunca se la migra.
 -- =============================================================
 
 
