@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · editar pedido</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view" style="max-width:760px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title" id="titulo">pedido</div>
+          <div class="view-header-sub">Líneas de pedido, ubicación y excepciones</div>
+        </div>
+        <a href="/pedidos" class="btn-secondary">← Volver</a>
+      </div>
+
+      <div id="aviso-sync" class="form-error hidden"></div>
+      <div id="error-global" class="form-error hidden"></div>
+
+      <!-- Cabecera del pedido -->
+      <div class="card">
+        <div class="card-title">datos del pedido</div>
+        <div class="cliente-info-grid" id="info-pedido"></div>
+
+        <div class="form-group mt-12">
+          <label class="form-label">Ubicación de entrega</label>
+          <select id="f-ubicacion"><option value="">— Sin especificar —</option></select>
+          <div class="nota mt-8" id="nota-ubicacion"></div>
+          <div class="btn-row mt-8">
+            <button class="btn-secondary" id="btn-guardar-ubicacion">Guardar ubicación</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Líneas -->
+      <div class="card">
+        <div class="card-title">líneas del pedido</div>
+        <div id="lista-lineas"></div>
+      </div>
+
+      <!-- Agregar línea -->
+      <div class="card" id="card-agregar">
+        <div class="card-title">agregar línea</div>
+        <div id="nueva-linea"></div>
+        <div class="btn-row mt-8">
+          <button class="btn-primary" id="btn-agregar-linea">Agregar línea</button>
+        </div>
+      </div>
+
+      <!-- Auditoría -->
+      <div class="card">
+        <div class="card-title">auditoría</div>
+        <div id="lista-auditoria"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de motivo: toda edición y cancelación lo exige (patrón de auditoría
+       obligatoria ya existente en el CRM). -->
+  <div id="modal-motivo" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:420px;width:100%;">
+      <div class="card-title" id="modal-motivo-titulo">motivo</div>
+      <div class="form-group">
+        <label class="form-label">Motivo</label>
+        <textarea id="modal-motivo-texto" placeholder="Por qué se hace este cambio..."></textarea>
+      </div>
+      <div id="modal-motivo-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-motivo-confirmar">Confirmar</button>
+        <button class="btn-secondary" id="modal-motivo-cerrar">Volver</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const PEDIDO_ID = Number(window.location.pathname.split('/')[2]);
+    let PEDIDO = null;
+    let CATALOGO_PLATOS = [];
+    let accionPendiente = null; // callback que espera el motivo
+
+    (async function () {
+      await ensureSession();
+      renderNav('/pedidos');
+
+      try {
+        const { categorias } = await api('/api/platos');
+        CATALOGO_PLATOS = categorias;
+      } catch (e) { mostrarError('No se pudo cargar el catálogo de platos: ' + e.message); }
+
+      document.getElementById('modal-motivo-cerrar').addEventListener('click', cerrarModalMotivo);
+      document.getElementById('modal-motivo-confirmar').addEventListener('click', confirmarMotivo);
+      document.getElementById('btn-guardar-ubicacion').addEventListener('click', guardarUbicacion);
+      document.getElementById('btn-agregar-linea').addEventListener('click', agregarLinea);
+
+      await cargar();
+    })();
+
+    function mostrarError(msg) {
+      const box = document.getElementById('error-global');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+
+    function limpiarError() {
+      document.getElementById('error-global').classList.add('hidden');
+    }
+
+    // Avisa cuando el CRM guardó pero el espejado hacia Narma Pedidos falló.
+    function avisarSync(sync) {
+      const box = document.getElementById('aviso-sync');
+      if (sync && sync.ok === false) {
+        box.textContent = 'El cambio se guardó en el CRM, pero NO se pudo sincronizar con Narma Pedidos'
+          + (sync.motivo === 'sync_deshabilitado' ? ' (la conexión no está configurada).' : '.')
+          + ' Quedó registrado en sync_errores para reenviarlo. Avisá a producción por otro canal.';
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+
+    // ── Carga ────────────────────────────────────────────────────
+
+    async function cargar() {
+      limpiarError();
+      try {
+        const { pedido } = await api('/api/pedidos/' + PEDIDO_ID);
+        PEDIDO = pedido;
+      } catch (e) {
+        mostrarError('No se pudo cargar el pedido: ' + e.message);
+        return;
+      }
+
+      document.getElementById('titulo').textContent = 'pedido #' + PEDIDO.id;
+      renderInfo();
+      await cargarUbicaciones();
+      renderLineas();
+      renderNuevaLinea();
+      await cargarAuditoria();
+
+      // Un pedido cancelado no se edita más: el backend lo rechaza, así que la
+      // UI tampoco lo ofrece.
+      const bloqueado = PEDIDO.cancelado || CURRENT_USER.rol !== 'admin';
+      document.getElementById('card-agregar').classList.toggle('hidden', bloqueado);
+      document.getElementById('btn-guardar-ubicacion').disabled = bloqueado;
+    }
+
+    function renderInfo() {
+      const p = PEDIDO;
+      const envase = p.cliente_tipo_envase || '—';
+      document.getElementById('info-pedido').innerHTML = `
+        <div class="cliente-info-item"><span class="form-label">Cliente</span>
+          <div class="cliente-info-value"><a href="/clientes/${p.cliente_id}">${escapeHtml(p.cliente_nombre)}</a></div></div>
+        <div class="cliente-info-item"><span class="form-label">Segmento</span>
+          <div class="cliente-info-value">${SEGMENTO_LABEL[p.cliente_segmento] || p.cliente_segmento}</div></div>
+        <div class="cliente-info-item"><span class="form-label">Envase del cliente</span>
+          <div class="cliente-info-value">${escapeHtml(envase)}</div></div>
+        <div class="cliente-info-item"><span class="form-label">Fecha del pedido</span>
+          <div class="cliente-info-value">${fmtFecha(p.fecha_pedido)}</div></div>
+        <div class="cliente-info-item"><span class="form-label">Monto</span>
+          <div class="cliente-info-value">${fmtGs(p.monto)}</div></div>
+        <div class="cliente-info-item"><span class="form-label">Estado</span>
+          <div class="cliente-info-value">${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : badgeEstadoPago(p.estado_pago)}</div></div>
+      `;
+    }
+
+    async function cargarUbicaciones() {
+      const sel = document.getElementById('f-ubicacion');
+      let ubic = [];
+      try {
+        const { cliente } = await api('/api/clientes/' + PEDIDO.cliente_id);
+        ubic = cliente.ubicaciones || [];
+      } catch (e) { /* sin ubicaciones, el select queda solo con "sin especificar" */ }
+
+      sel.innerHTML = '<option value="">— Sin especificar —</option>' + ubic.map(u => {
+        const etiqueta = [u.direccion, u.zona].filter(Boolean).join(' · ') || ('Ubicación ' + u.orden);
+        return `<option value="${u.id}">${escapeHtml(etiqueta)}</option>`;
+      }).join('');
+      sel.value = PEDIDO.ubicacion_id ? String(PEDIDO.ubicacion_id) : '';
+
+      document.getElementById('nota-ubicacion').textContent = ubic.length
+        ? 'Elegí una de las ubicaciones guardadas del cliente.'
+        : 'Este cliente no tiene ubicaciones guardadas. Se cargan desde la ficha del cliente.';
+    }
+
+    async function cargarAuditoria() {
+      const cont = document.getElementById('lista-auditoria');
+      try {
+        const { auditoria } = await api('/api/pedidos/' + PEDIDO_ID + '/auditoria');
+        if (!auditoria.length) {
+          cont.innerHTML = '<div class="empty-state">Sin ediciones ni cancelaciones registradas.</div>';
+          return;
+        }
+        cont.innerHTML = auditoria.map(a => `
+          <div style="padding:8px 0;border-bottom:1px solid rgba(8,43,85,0.08);font-size:11px;">
+            <span class="badge ${a.accion === 'cancelacion' ? 'badge-danger' : 'badge-info'}">${a.accion}</span>
+            <strong>${escapeHtml(a.usuario)}</strong>
+            <span class="text-muted">· ${fmtFecha(a.fecha)}</span>
+            <div class="mt-8">${escapeHtml(a.motivo)}</div>
+            ${a.detalle ? `<div class="nota mt-8" style="white-space:pre-wrap;">${escapeHtml(JSON.stringify(a.detalle, null, 1))}</div>` : ''}
+          </div>
+        `).join('');
+      } catch (e) {
+        cont.innerHTML = '<div class="empty-state">No se pudo cargar la auditoría.</div>';
+      }
+    }
+
+    // ── Líneas ───────────────────────────────────────────────────
+
+    function opcionesPlatos(seleccionado) {
+      return CATALOGO_PLATOS.map(c => `
+        <optgroup label="${escapeHtml(c.categoria)}">
+          ${c.platos.map(p => `<option value="${p.id}"${Number(seleccionado) === p.id ? ' selected' : ''}>${escapeHtml(p.nombre)}</option>`).join('')}
+        </optgroup>`).join('');
+    }
+
+    function fechasLinea(l) {
+      if (l.modo === 'puntual') return fmtFecha(l.fecha_entrega);
+      return `${fmtFecha(l.fecha_desde)} → ${fmtFecha(l.fecha_hasta)} <span class="text-muted">(lun a vie)</span>`;
+    }
+
+    function renderLineas() {
+      const cont = document.getElementById('lista-lineas');
+      const lineas = PEDIDO.lineas || [];
+      if (!lineas.length) {
+        cont.innerHTML = '<div class="empty-state">Este pedido todavía no tiene líneas cargadas.</div>';
+        return;
+      }
+
+      const esAdmin = CURRENT_USER.rol === 'admin';
+      cont.innerHTML = lineas.map(l => {
+        const editable = esAdmin && !l.cancelado && !PEDIDO.cancelado;
+        return `
+        <div class="card" style="padding:12px;margin-bottom:10px;" data-linea="${l.id}">
+          <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+            <strong>${escapeHtml(l.plato_nombre)}</strong>
+            <span class="text-muted">· ${escapeHtml(l.plato_categoria)}</span>
+            <span class="badge badge-neutral">x${l.cantidad}</span>
+            <span class="badge ${l.modo === 'recurrente' ? 'badge-info' : 'badge-neutral'}">${l.modo}</span>
+            ${l.cancelado ? '<span class="badge badge-danger">Cancelada</span>' : ''}
+            ${l.tipo_envase_override ? `<span class="badge badge-warning">envase: ${escapeHtml(l.tipo_envase_override)}</span>` : ''}
+          </div>
+          <div class="nota mt-8">${fechasLinea(l)}</div>
+          ${l.comentario ? `<div class="nota mt-8">“${escapeHtml(l.comentario)}”</div>` : ''}
+
+          ${editable ? `
+          <div class="btn-row mt-8">
+            <button class="btn-secondary l-editar">Editar</button>
+            <button class="btn-secondary l-cancelar">Cancelar línea</button>
+          </div>` : ''}
+
+          <div class="l-editor hidden mt-12"></div>
+
+          ${l.modo === 'recurrente' ? `
+            <div class="divider mt-12"></div>
+            <div class="form-label mt-8">Excepciones por fecha</div>
+            ${renderExcepciones(l, editable)}
+          ` : ''}
+        </div>`;
+      }).join('');
+
+      // Handlers
+      cont.querySelectorAll('[data-linea]').forEach(el => {
+        const lineaId = Number(el.dataset.linea);
+        const linea = lineas.find(x => x.id === lineaId);
+
+        const btnEditar = el.querySelector('.l-editar');
+        if (btnEditar) btnEditar.addEventListener('click', () => abrirEditorLinea(el, linea));
+
+        const btnCancelar = el.querySelector('.l-cancelar');
+        if (btnCancelar) btnCancelar.addEventListener('click', () => {
+          pedirMotivo('cancelar línea', async (motivo) => {
+            const r = await api(`/api/pedidos/${PEDIDO_ID}/lineas/${lineaId}/cancelar`, {
+              method: 'PATCH', body: { motivo },
+            });
+            avisarSync(r.sync);
+            await cargar();
+          });
+        });
+
+        const btnExc = el.querySelector('.e-agregar');
+        if (btnExc) btnExc.addEventListener('click', () => guardarExcepcion(el, lineaId));
+
+        el.querySelectorAll('.e-quitar').forEach(b => {
+          b.addEventListener('click', () => {
+            const excId = Number(b.dataset.exc);
+            pedirMotivo('quitar excepción', async (motivo) => {
+              const r = await api(
+                `/api/pedidos/${PEDIDO_ID}/lineas/${lineaId}/excepciones/${excId}?motivo=${encodeURIComponent(motivo)}`,
+                { method: 'DELETE', body: { motivo } }
+              );
+              avisarSync(r.sync);
+              await cargar();
+            });
+          });
+        });
+      });
+    }
+
+    function renderExcepciones(l, editable) {
+      const exc = l.excepciones || [];
+      const lista = exc.length ? exc.map(e => {
+        const partes = [];
+        if (e.omitir) partes.push('<span class="badge badge-danger">no se produce</span>');
+        if (e.plato_id) partes.push(`plato: ${escapeHtml(e.plato_nombre || String(e.plato_id))}`);
+        if (e.cantidad !== null && e.cantidad !== undefined) partes.push(`cantidad: ${e.cantidad}`);
+        if (e.comentario) partes.push(`“${escapeHtml(e.comentario)}”`);
+        return `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:11px;flex-wrap:wrap;">
+            <strong>${fmtFecha(e.fecha)}</strong>
+            <span>${partes.join(' · ') || '<span class="text-muted">sin cambios</span>'}</span>
+            ${editable ? `<button class="btn-secondary e-quitar" data-exc="${e.id}" style="padding:2px 8px;">Quitar</button>` : ''}
+          </div>`;
+      }).join('') : '<div class="nota">Sin excepciones: se entrega igual todos los días hábiles del rango.</div>';
+
+      const alta = editable ? `
+        <div class="mt-8" style="background:rgba(8,43,85,0.03);padding:10px;border-radius:8px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Fecha</label>
+              <input type="date" class="e-fecha" min="${String(l.fecha_desde || '').slice(0, 10)}" max="${String(l.fecha_hasta || '').slice(0, 10)}"/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cantidad (opcional)</label>
+              <input type="number" class="e-cantidad" min="1" step="1" placeholder="sin cambio"/>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Otro plato (opcional)</label>
+              <select class="e-plato"><option value="">— sin cambio —</option>${opcionesPlatos(null)}</select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Comentario (opcional)</label>
+              <input type="text" class="e-comentario" placeholder="sin cambio"/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label"><input type="checkbox" class="e-omitir"/> No producir nada ese día</label>
+          </div>
+          <button class="btn-secondary e-agregar">Guardar excepción</button>
+        </div>` : '';
+
+      return lista + alta;
+    }
+
+    // Editor inline de una línea. Manda la definición completa, que es lo que
+    // espera el backend para validar modo + fechas como un todo.
+    function abrirEditorLinea(el, l) {
+      const cont = el.querySelector('.l-editor');
+      if (!cont.classList.contains('hidden')) { cont.classList.add('hidden'); return; }
+
+      const esRec = l.modo === 'recurrente';
+      cont.innerHTML = `
+        <div class="divider"></div>
+        <div class="form-row mt-8">
+          <div class="form-group">
+            <label class="form-label">Plato</label>
+            <select class="ed-plato">${opcionesPlatos(l.plato_id)}</select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cantidad</label>
+            <input type="number" class="ed-cantidad" min="1" step="1" value="${l.cantidad}"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Modo</label>
+            <select class="ed-modo">
+              <option value="puntual"${!esRec ? ' selected' : ''}>Puntual (una fecha)</option>
+              <option value="recurrente"${esRec ? ' selected' : ''}>Recurrente (rango lun-vie)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Envase</label>
+            <select class="ed-envase">
+              <option value="">— Según el cliente —</option>
+              <option value="Narma"${l.tipo_envase_override === 'Narma' ? ' selected' : ''}>Narma</option>
+              <option value="Venezia"${l.tipo_envase_override === 'Venezia' ? ' selected' : ''}>Venezia</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group ed-grupo-puntual${esRec ? ' hidden' : ''}">
+          <label class="form-label">Fecha de entrega</label>
+          <input type="date" class="ed-fecha-entrega" value="${String(l.fecha_entrega || '').slice(0, 10)}"/>
+        </div>
+        <div class="form-row ed-grupo-recurrente${esRec ? '' : ' hidden'}">
+          <div class="form-group">
+            <label class="form-label">Desde</label>
+            <input type="date" class="ed-fecha-desde" value="${String(l.fecha_desde || '').slice(0, 10)}"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hasta</label>
+            <input type="date" class="ed-fecha-hasta" value="${String(l.fecha_hasta || '').slice(0, 10)}"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Comentario</label>
+          <input type="text" class="ed-comentario" value="${escapeHtml(l.comentario || '')}"/>
+        </div>
+        <div class="nota">Si la línea pasa de recurrente a puntual, sus excepciones se eliminan.</div>
+        <div class="btn-row mt-8">
+          <button class="btn-primary ed-guardar">Guardar cambios</button>
+        </div>
+      `;
+      cont.classList.remove('hidden');
+
+      const selModo = cont.querySelector('.ed-modo');
+      selModo.addEventListener('change', () => {
+        const r = selModo.value === 'recurrente';
+        cont.querySelector('.ed-grupo-puntual').classList.toggle('hidden', r);
+        cont.querySelector('.ed-grupo-recurrente').classList.toggle('hidden', !r);
+      });
+
+      cont.querySelector('.ed-guardar').addEventListener('click', () => {
+        const modo = selModo.value;
+        const body = {
+          plato_id: Number(cont.querySelector('.ed-plato').value),
+          cantidad: parseInt(cont.querySelector('.ed-cantidad').value, 10),
+          modo,
+          comentario: cont.querySelector('.ed-comentario').value.trim() || null,
+          tipo_envase_override: cont.querySelector('.ed-envase').value || null,
+          fecha_entrega: modo === 'puntual' ? (cont.querySelector('.ed-fecha-entrega').value || null) : null,
+          fecha_desde: modo === 'recurrente' ? (cont.querySelector('.ed-fecha-desde').value || null) : null,
+          fecha_hasta: modo === 'recurrente' ? (cont.querySelector('.ed-fecha-hasta').value || null) : null,
+        };
+        pedirMotivo('editar línea', async (motivo) => {
+          const r = await api(`/api/pedidos/${PEDIDO_ID}/lineas/${l.id}`, {
+            method: 'PATCH', body: { ...body, motivo },
+          });
+          avisarSync(r.sync);
+          await cargar();
+        });
+      });
+    }
+
+    function guardarExcepcion(el, lineaId) {
+      const fecha = el.querySelector('.e-fecha').value;
+      const cantidadStr = el.querySelector('.e-cantidad').value.trim();
+      const platoStr = el.querySelector('.e-plato').value;
+      const comentario = el.querySelector('.e-comentario').value.trim();
+      const omitir = el.querySelector('.e-omitir').checked;
+
+      if (!fecha) { mostrarError('Indicá la fecha de la excepción.'); return; }
+      limpiarError();
+
+      const body = {
+        fecha,
+        omitir,
+        plato_id: platoStr ? Number(platoStr) : null,
+        cantidad: cantidadStr ? parseInt(cantidadStr, 10) : null,
+        comentario: comentario || null,
+      };
+
+      pedirMotivo('guardar excepción', async (motivo) => {
+        const r = await api(`/api/pedidos/${PEDIDO_ID}/lineas/${lineaId}/excepciones`, {
+          method: 'PUT', body: { ...body, motivo },
+        });
+        avisarSync(r.sync);
+        await cargar();
+      });
+    }
+
+    // ── Alta de línea ────────────────────────────────────────────
+
+    function renderNuevaLinea() {
+      document.getElementById('nueva-linea').innerHTML = `
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Plato</label>
+            <select class="n-plato"><option value="">— Elegir —</option>${opcionesPlatos(null)}</select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cantidad</label>
+            <input type="number" class="n-cantidad" min="1" step="1" placeholder="Ej: 10"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Modo</label>
+            <select class="n-modo">
+              <option value="puntual">Puntual (una fecha)</option>
+              <option value="recurrente">Recurrente (rango lun-vie)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Envase</label>
+            <select class="n-envase">
+              <option value="">— Según el cliente —</option>
+              <option value="Narma">Narma</option>
+              <option value="Venezia">Venezia</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group n-grupo-puntual">
+          <label class="form-label">Fecha de entrega</label>
+          <input type="date" class="n-fecha-entrega"/>
+        </div>
+        <div class="form-row n-grupo-recurrente hidden">
+          <div class="form-group">
+            <label class="form-label">Desde</label>
+            <input type="date" class="n-fecha-desde"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hasta</label>
+            <input type="date" class="n-fecha-hasta"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Comentario</label>
+          <input type="text" class="n-comentario" placeholder="Ej: sin sal"/>
+        </div>
+      `;
+
+      const cont = document.getElementById('nueva-linea');
+      const selModo = cont.querySelector('.n-modo');
+      selModo.addEventListener('change', () => {
+        const r = selModo.value === 'recurrente';
+        cont.querySelector('.n-grupo-puntual').classList.toggle('hidden', r);
+        cont.querySelector('.n-grupo-recurrente').classList.toggle('hidden', !r);
+      });
+    }
+
+    function agregarLinea() {
+      const cont = document.getElementById('nueva-linea');
+      const modo = cont.querySelector('.n-modo').value;
+      const platoStr = cont.querySelector('.n-plato').value;
+      const cantidadStr = cont.querySelector('.n-cantidad').value.trim();
+
+      if (!platoStr || !cantidadStr) { mostrarError('Elegí un plato y una cantidad.'); return; }
+      limpiarError();
+
+      const linea = {
+        plato_id: Number(platoStr),
+        cantidad: parseInt(cantidadStr, 10),
+        modo,
+        comentario: cont.querySelector('.n-comentario').value.trim() || null,
+        tipo_envase_override: cont.querySelector('.n-envase').value || null,
+        fecha_entrega: modo === 'puntual' ? (cont.querySelector('.n-fecha-entrega').value || null) : null,
+        fecha_desde: modo === 'recurrente' ? (cont.querySelector('.n-fecha-desde').value || null) : null,
+        fecha_hasta: modo === 'recurrente' ? (cont.querySelector('.n-fecha-hasta').value || null) : null,
+      };
+
+      pedirMotivo('agregar línea', async (motivo) => {
+        const r = await api(`/api/pedidos/${PEDIDO_ID}/lineas`, {
+          method: 'POST', body: { lineas: [linea], motivo },
+        });
+        avisarSync(r.sync);
+        await cargar();
+      });
+    }
+
+    // ── Ubicación ────────────────────────────────────────────────
+
+    function guardarUbicacion() {
+      const valor = document.getElementById('f-ubicacion').value;
+      pedirMotivo('cambiar ubicación', async (motivo) => {
+        const r = await api('/api/pedidos/' + PEDIDO_ID, {
+          method: 'PATCH', body: { ubicacion_id: valor === '' ? null : Number(valor), motivo },
+        });
+        avisarSync(r.sync);
+        await cargar();
+      });
+    }
+
+    // ── Modal de motivo ──────────────────────────────────────────
+
+    function pedirMotivo(titulo, callback) {
+      accionPendiente = callback;
+      document.getElementById('modal-motivo-titulo').textContent = titulo;
+      document.getElementById('modal-motivo-texto').value = '';
+      document.getElementById('modal-motivo-error').classList.add('hidden');
+      document.getElementById('modal-motivo').classList.remove('hidden');
+      document.getElementById('modal-motivo-texto').focus();
+    }
+
+    function cerrarModalMotivo() {
+      accionPendiente = null;
+      document.getElementById('modal-motivo').classList.add('hidden');
+    }
+
+    async function confirmarMotivo() {
+      const motivo = document.getElementById('modal-motivo-texto').value.trim();
+      const errorBox = document.getElementById('modal-motivo-error');
+      if (!motivo) {
+        errorBox.textContent = 'El motivo es requerido.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      const btn = document.getElementById('modal-motivo-confirmar');
+      const callback = accionPendiente;
+      btn.disabled = true;
+      btn.textContent = 'Guardando...';
+      try {
+        await callback(motivo);
+        cerrarModalMotivo();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Confirmar';
+      }
+    }
+  </script>
+</body>
+</html>

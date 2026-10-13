@@ -64,10 +64,19 @@
             <label class="form-label">Segmento</label>
             <select id="f-segmento">
               <option value="particular">Particular</option>
-              <option value="empresa">Empresa</option>
+              <option value="empresa">Corporativo</option>
               <option value="embajador">Embajador</option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tipo de envase</label>
+          <select id="f-tipo-envase">
+            <option value="Venezia">Venezia</option>
+            <option value="Narma">Narma</option>
+          </select>
+          <div class="nota mt-8">Envase en el que se entrega. Las empresas con envase propio (UENO BANK, Kaitel, Itti SAE) van en "Narma".</div>
         </div>
 
         <div class="form-group hidden" id="grupo-empresa">
@@ -253,6 +262,7 @@
           document.getElementById('f-telefono3').value = cliente.telefono3;
         }
         document.getElementById('f-segmento').value = cliente.segmento || 'particular';
+        document.getElementById('f-tipo-envase').value = cliente.tipo_envase || 'Venezia';
         document.getElementById('f-empresa').value = cliente.empresa || '';
         document.getElementById('f-canal').value = cliente.canal_origen || 'whatsapp';
         document.getElementById('f-codigo-embajador').value = cliente.codigo_embajador || '';
@@ -301,6 +311,7 @@
         telefono2: document.getElementById('f-telefono2').value.trim(),
         telefono3: document.getElementById('f-telefono3').value.trim(),
         segmento: document.getElementById('f-segmento').value,
+        tipo_envase: document.getElementById('f-tipo-envase').value,
         empresa: document.getElementById('f-empresa').value.trim(),
         canal_origen: document.getElementById('f-canal').value,
         codigo_embajador: document.getElementById('f-codigo-embajador').value.trim(),

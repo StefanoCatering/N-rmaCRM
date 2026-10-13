@@ -43,6 +43,21 @@
         </div>
 
         <div class="form-group">
+          <label class="form-label">Ubicación de entrega</label>
+          <select id="f-ubicacion">
+            <option value="">— Sin especificar —</option>
+          </select>
+          <div class="nota mt-8" id="nota-ubicacion">Elegí una de las ubicaciones guardadas del cliente.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Líneas del pedido</label>
+          <div id="lineas"></div>
+          <button type="button" class="btn-secondary mt-8" id="btn-agregar-linea">+ Agregar línea</button>
+          <div class="nota mt-8">Cada línea es un plato con su cantidad. "Recurrente" se entrega de lunes a viernes dentro del rango; los días sueltos se ajustan después con excepciones, desde la vista de edición del pedido.</div>
+        </div>
+
+        <div class="form-group">
           <label class="form-label">Tipo de vianda</label>
           <select id="f-tipo-vianda">
             <option value="">— No especifica —</option>
@@ -115,6 +130,7 @@
   <script>
     let timerBuscar = null;
     let clienteSeleccionado = null;
+    let CATALOGO_PLATOS = [];
 
     (async function () {
       await ensureSession();
@@ -127,7 +143,7 @@
       if (clienteIdPre) {
         try {
           const { cliente } = await api(`/api/clientes/${clienteIdPre}`);
-          seleccionarCliente(cliente);
+          await seleccionarCliente(cliente);
         } catch (e) { /* ignorar si no existe */ }
       }
 
@@ -150,6 +166,19 @@
       });
 
       document.getElementById('btn-guardar').addEventListener('click', guardar);
+
+      // Catálogo de platos: se arma con lo que haya en la tabla platos, así que
+      // un alta hecha directo en la base aparece acá sin tocar el código.
+      try {
+        const { categorias } = await api('/api/platos');
+        CATALOGO_PLATOS = categorias;
+      } catch (e) {
+        const box = document.getElementById('form-error');
+        box.textContent = 'No se pudo cargar el catálogo de platos: ' + e.message;
+        box.classList.remove('hidden');
+      }
+      document.getElementById('btn-agregar-linea').addEventListener('click', () => agregarLinea());
+      agregarLinea();
 
       document.getElementById('f-estado-pago').addEventListener('change', toggleMontoAbonado);
       toggleMontoAbonado();
@@ -201,8 +230,124 @@
       cont.classList.remove('hidden');
     }
 
-    function seleccionarCliente(cliente) {
+    function opcionesPlatos() {
+      return CATALOGO_PLATOS.map(c => `
+        <optgroup label="${escapeHtml(c.categoria)}">
+          ${c.platos.map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join('')}
+        </optgroup>`).join('');
+    }
+
+    // Agrega una línea al form. Sin estado intermedio: los valores se leen del
+    // DOM al guardar, así escribir en un campo no re-renderiza ni pierde el foco.
+    function agregarLinea() {
+      const div = document.createElement('div');
+      div.className = 'linea-pedido card';
+      div.setAttribute('style', 'padding:10px;margin-bottom:8px;');
+      div.innerHTML = `
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Plato</label>
+            <select class="l-plato"><option value="">— Elegir —</option>${opcionesPlatos()}</select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cantidad</label>
+            <input type="number" class="l-cantidad" min="1" step="1" placeholder="Ej: 10"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Modo</label>
+            <select class="l-modo">
+              <option value="puntual">Puntual (una fecha)</option>
+              <option value="recurrente">Recurrente (rango lun-vie)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Envase</label>
+            <select class="l-envase">
+              <option value="">— Según el cliente —</option>
+              <option value="Narma">Narma</option>
+              <option value="Venezia">Venezia</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group l-grupo-puntual">
+          <label class="form-label">Fecha de entrega</label>
+          <input type="date" class="l-fecha-entrega"/>
+        </div>
+        <div class="form-row l-grupo-recurrente hidden">
+          <div class="form-group">
+            <label class="form-label">Desde</label>
+            <input type="date" class="l-fecha-desde"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hasta</label>
+            <input type="date" class="l-fecha-hasta"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Comentario</label>
+          <input type="text" class="l-comentario" placeholder="Ej: sin sal"/>
+        </div>
+        <button type="button" class="btn-secondary l-quitar">Quitar línea</button>
+      `;
+
+      const selModo = div.querySelector('.l-modo');
+      selModo.addEventListener('change', () => {
+        const esRecurrente = selModo.value === 'recurrente';
+        div.querySelector('.l-grupo-puntual').classList.toggle('hidden', esRecurrente);
+        div.querySelector('.l-grupo-recurrente').classList.toggle('hidden', !esRecurrente);
+      });
+      div.querySelector('.l-quitar').addEventListener('click', () => div.remove());
+
+      document.getElementById('lineas').appendChild(div);
+    }
+
+    // Líneas cargadas. Una línea que quedó totalmente vacía se ignora, para que
+    // un "+ Agregar línea" de más no bloquee el guardado.
+    function recolectarLineas() {
+      const out = [];
+      document.querySelectorAll('#lineas .linea-pedido').forEach(el => {
+        const platoId = el.querySelector('.l-plato').value;
+        const cantidadStr = el.querySelector('.l-cantidad').value.trim();
+        if (!platoId && !cantidadStr) return;
+        const modo = el.querySelector('.l-modo').value;
+        out.push({
+          plato_id: platoId ? Number(platoId) : null,
+          cantidad: cantidadStr ? parseInt(cantidadStr, 10) : null,
+          modo,
+          comentario: el.querySelector('.l-comentario').value.trim() || null,
+          tipo_envase_override: el.querySelector('.l-envase').value || null,
+          fecha_entrega: modo === 'puntual' ? (el.querySelector('.l-fecha-entrega').value || null) : null,
+          fecha_desde: modo === 'recurrente' ? (el.querySelector('.l-fecha-desde').value || null) : null,
+          fecha_hasta: modo === 'recurrente' ? (el.querySelector('.l-fecha-hasta').value || null) : null,
+        });
+      });
+      return out;
+    }
+
+    function cargarUbicaciones(cliente) {
+      const sel = document.getElementById('f-ubicacion');
+      const ubic = cliente.ubicaciones || [];
+      sel.innerHTML = '<option value="">— Sin especificar —</option>' + ubic.map(u => {
+        const etiqueta = [u.direccion, u.zona].filter(Boolean).join(' · ') || ('Ubicación ' + u.orden);
+        return `<option value="${u.id}">${escapeHtml(etiqueta)}</option>`;
+      }).join('');
+      document.getElementById('nota-ubicacion').textContent = ubic.length
+        ? 'Elegí una de las ubicaciones guardadas del cliente.'
+        : 'Este cliente no tiene ubicaciones guardadas. Se cargan desde la ficha del cliente.';
+    }
+
+    async function seleccionarCliente(cliente) {
+      // El buscador devuelve el cliente sin ubicaciones; la ficha completa sí
+      // las trae, así que se pide cuando faltan.
+      if (!cliente.ubicaciones) {
+        try {
+          cliente = (await api('/api/clientes/' + cliente.id)).cliente;
+        } catch (e) { /* si falla, se sigue con lo que trajo el buscador */ }
+      }
       clienteSeleccionado = cliente;
+      cargarUbicaciones(cliente);
       document.getElementById('f-cliente-id').value = cliente.id;
       document.getElementById('f-cliente-buscar').value = '';
       document.getElementById('cliente-resultados').classList.add('hidden');
@@ -257,13 +402,20 @@
         detalle_modificacion: tipoVianda === 'modificacion_menu' ? detalleModificacion : null,
         fecha_entrega_desde: document.getElementById('f-entrega-desde').value || null,
         fecha_entrega_hasta: document.getElementById('f-entrega-hasta').value || null,
+        ubicacion_id: document.getElementById('f-ubicacion').value || null,
+        lineas: recolectarLineas(),
       };
 
       const btn = document.getElementById('btn-guardar');
       btn.disabled = true;
       btn.textContent = 'Guardando...';
       try {
-        await api('/api/pedidos', { method: 'POST', body: payload });
+        const resp = await api('/api/pedidos', { method: 'POST', body: payload });
+        // El pedido se guarda igual aunque el sync falle; la ATC tiene que
+        // saberlo para avisar a producción por otro canal.
+        if (resp.sync && resp.sync.ok === false) {
+          alert('El pedido se guardó en el CRM, pero NO se pudo sincronizar con Narma Pedidos.\n\nQuedó registrado para reenviarlo. Avisá a producción por otro canal.');
+        }
         window.location.href = `/clientes/${clienteSeleccionado.id}`;
       } catch (e) {
         errorBox.textContent = e.message;

@@ -182,6 +182,9 @@ app.get('/clientes/:id/editar', requireAuth(['admin', 'operador']), view('client
 app.get('/clientes/:id', requireAuth(), view('cliente-ficha.html'));
 app.get('/pedidos/nuevo', requireAuth(['admin', 'operador']), view('pedido-form.html'));
 app.get('/pedidos', requireAuth(['admin', 'operador']), view('pedidos.html'));
+// Vista de edición del pedido: líneas, ubicación y excepciones por fecha.
+// Se registra después de /pedidos/nuevo para que esa ruta literal gane.
+app.get('/pedidos/:id/editar', requireAuth(['admin', 'operador']), view('pedido-detalle.html'));
 
 // ── API de negocio ────────────────────────────────────────────────
 
