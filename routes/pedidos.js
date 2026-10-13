@@ -4,6 +4,7 @@ const pedidos = require('../models/pedidos');
 const detalle = require('../models/pedidoDetalle');
 const platos = require('../models/platos');
 const ubicaciones = require('../models/ubicaciones');
+const syncPedidos = require('../models/syncPedidos');
 
 const router = express.Router();
 
@@ -235,7 +236,12 @@ router.post('/', requireEscritura, async (req, res, next) => {
       ubicacion_id,
       lineas,
     });
-    res.status(201).json({ pedido });
+
+    // El pedido ya está guardado. Si el espejado hacia Narma Pedidos falla,
+    // queda registrado en sync_errores y la respuesta lo informa, pero el
+    // pedido NO se deshace (requisito 9.c).
+    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    res.status(201).json({ pedido, sync });
   } catch (err) { next(err); }
 });
 
@@ -339,7 +345,9 @@ router.patch('/:id', requireAdmin, async (req, res, next) => {
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
     const actualizado = await pedidos.update(id, pedido, cambios, req.user.username, motivo);
-    res.json({ pedido: actualizado });
+    // ubicacion_id cambia la dirección que ve producción, así que se re-espeja.
+    const sync = await syncPedidos.sincronizarSinFallar(id);
+    res.json({ pedido: actualizado, sync });
   } catch (err) { next(err); }
 });
 
@@ -356,7 +364,10 @@ router.patch('/:id/cancelar', requireAdmin, async (req, res, next) => {
     if (!motivo) return res.status(400).json({ error: 'El motivo es requerido' });
 
     const actualizado = await pedidos.cancelar(id, req.user.username, motivo);
-    res.json({ pedido: actualizado });
+    // Marca cancelado = true en todas las filas del pedido en Narma Pedidos
+    // (UPDATE, no DELETE — requisito 9.d).
+    const sync = await syncPedidos.sincronizarSinFallar(id);
+    res.json({ pedido: actualizado, sync });
   } catch (err) { next(err); }
 });
 
@@ -416,7 +427,8 @@ router.post('/:id/lineas', requireAdmin, async (req, res, next) => {
       })),
     }, motivo);
 
-    res.status(201).json({ pedido: await pedidos.getConDetalle(pedido.id) });
+    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    res.status(201).json({ pedido: await pedidos.getConDetalle(pedido.id), sync });
   } catch (err) { next(err); }
 });
 
@@ -472,7 +484,8 @@ router.patch('/:id/lineas/:lineaId', requireAdmin, async (req, res, next) => {
       linea_id: linea.id, campos: detalleAuditoria,
     }, motivo);
 
-    res.json({ linea: actualizada, pedido: await pedidos.getConDetalle(pedido.id) });
+    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    res.json({ linea: actualizada, pedido: await pedidos.getConDetalle(pedido.id), sync });
   } catch (err) { next(err); }
 });
 
@@ -496,7 +509,8 @@ router.patch('/:id/lineas/:lineaId/cancelar', requireAdmin, async (req, res, nex
       },
     }, motivo);
 
-    res.json({ linea: cancelada, pedido: await pedidos.getConDetalle(pedido.id) });
+    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    res.json({ linea: cancelada, pedido: await pedidos.getConDetalle(pedido.id), sync });
   } catch (err) { next(err); }
 });
 
@@ -571,7 +585,8 @@ router.put('/:id/lineas/:lineaId/excepciones', requireAdmin, async (req, res, ne
       excepcion: { id: excepcion.id, fecha, plato_id, cantidad, comentario, omitir },
     }, motivo);
 
-    res.json({ excepcion, pedido: await pedidos.getConDetalle(pedido.id) });
+    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    res.json({ excepcion, pedido: await pedidos.getConDetalle(pedido.id), sync });
   } catch (err) { next(err); }
 });
 
@@ -598,7 +613,19 @@ router.delete('/:id/lineas/:lineaId/excepciones/:excId', requireAdmin, async (re
       excepcion_eliminada: { id: excepcion.id, fecha: detalle.aISO(excepcion.fecha) },
     }, motivo);
 
-    res.json({ pedido: await pedidos.getConDetalle(pedido.id) });
+    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    res.json({ pedido: await pedidos.getConDetalle(pedido.id), sync });
+  } catch (err) { next(err); }
+});
+
+// GET /api/pedidos/sync/errores — intentos de sync fallidos (solo admin).
+// No colisiona con GET /:id porque son dos segmentos de path.
+// Es la vista de diagnóstico de la bitácora: qué quedó sin espejar en Narma
+// Pedidos y con qué payload reenviarlo.
+router.get('/sync/errores', requireAdmin, async (req, res, next) => {
+  try {
+    const limite = Math.min(Number(req.query.limite) || 100, 500);
+    res.json({ errores: await syncPedidos.listarErrores(limite) });
   } catch (err) { next(err); }
 });
 

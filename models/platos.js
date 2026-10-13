@@ -32,4 +32,15 @@ async function idsActivos(ids) {
   return new Set(r.rows.map(row => row.id));
 }
 
-module.exports = { listActivosPorCategoria, idsActivos };
+// Map id → nombre para los ids dados, incluidos los inactivos: el sync tiene
+// que poder nombrar un plato que se desactivó después de cargarse el pedido.
+async function nombresPorId(ids) {
+  if (!ids.length) return new Map();
+  const r = await pool.query(
+    'SELECT id, nombre FROM platos WHERE id = ANY($1::int[])',
+    [ids]
+  );
+  return new Map(r.rows.map(row => [row.id, row.nombre]));
+}
+
+module.exports = { listActivosPorCategoria, idsActivos, nombresPorId };
