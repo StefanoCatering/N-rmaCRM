@@ -1,4 +1,17 @@
 const pool = require('./db');
+const detalle = require('./pedidoDetalle');
+
+// Registra una entrada en pedidos_auditoria. Es el mismo patrón de auditoría
+// obligatoria que ya usaban update() y cancelar(), extraído para poder reusarlo
+// desde las operaciones sobre líneas y excepciones (fase 6).
+// accion: 'edicion' | 'cancelacion' (CHECK de la tabla).
+async function auditar(pedidoId, accion, usuario, detalleJson, motivo, ejecutor = pool) {
+  await ejecutor.query(
+    `INSERT INTO pedidos_auditoria (pedido_id, accion, usuario, detalle, motivo)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [pedidoId, accion, usuario, detalleJson === null ? null : JSON.stringify(detalleJson), motivo]
+  );
+}
 
 async function listByCliente(clienteId) {
   const result = await pool.query(
@@ -38,34 +51,45 @@ async function update(id, pedidoActual, cambios, usuario, motivo) {
   );
   const actualizado = result.rows[0];
 
-  const detalle = {};
+  const detalleAuditoria = {};
   for (const campo of campos) {
-    detalle[campo] = { anterior: pedidoActual[campo], nuevo: cambios[campo] };
+    detalleAuditoria[campo] = { anterior: pedidoActual[campo], nuevo: cambios[campo] };
   }
-  await pool.query(
-    `INSERT INTO pedidos_auditoria (pedido_id, accion, usuario, detalle, motivo)
-     VALUES ($1, 'edicion', $2, $3, $4)`,
-    [id, usuario, JSON.stringify(detalle), motivo]
-  );
+  await auditar(id, 'edicion', usuario, detalleAuditoria, motivo);
 
   return actualizado;
 }
 
-// Marca un pedido como cancelado y registra la auditoría (sin detalle de campos).
+// Marca un pedido como cancelado y registra la auditoría.
+// Cancela además todas sus líneas, para que el estado del CRM quede coherente:
+// un pedido cancelado no puede tener líneas vivas, y el sync hacia Narma Pedidos
+// marca cancelado = true en todas las filas resueltas de ese pedido.
 async function cancelar(id, usuario, motivo) {
-  const result = await pool.query(
-    `UPDATE pedidos SET cancelado = true WHERE id = $1 RETURNING *`,
-    [id]
-  );
-  const actualizado = result.rows[0];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  await pool.query(
-    `INSERT INTO pedidos_auditoria (pedido_id, accion, usuario, detalle, motivo)
-     VALUES ($1, 'cancelacion', $2, NULL, $3)`,
-    [id, usuario, motivo]
-  );
+    const result = await client.query(
+      `UPDATE pedidos SET cancelado = true WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    const actualizado = result.rows[0];
 
-  return actualizado;
+    await client.query(
+      `UPDATE pedido_detalle SET cancelado = true WHERE pedido_id = $1 AND cancelado = false`,
+      [id]
+    );
+
+    await auditar(id, 'cancelacion', usuario, null, motivo, client);
+
+    await client.query('COMMIT');
+    return actualizado;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Historial de auditoría (ediciones y cancelaciones) de un pedido, más reciente primero.
@@ -186,35 +210,85 @@ async function viandasPorTipoPorSemana(fecha_desde, fecha_hasta) {
   return [...porSemana.values()].sort((a, b) => a.semana.localeCompare(b.semana));
 }
 
+// Crea el pedido y, si vienen, sus líneas de detalle — todo en una transacción,
+// para que no pueda quedar un pedido sin las líneas que la ATC cargó.
+// tipo_vianda / descripcion siguen existiendo y no cambian: las líneas de
+// pedido_detalle se suman a lo que ya había, no lo reemplazan (el dashboard
+// histórico depende de tipo_vianda).
 async function create({
   cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
-  fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion,
+  fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id, lineas = [],
 }) {
-  const result = await pool.query(
-    `INSERT INTO pedidos
-       (cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
-        fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-     RETURNING *`,
-    [
-      cliente_id,
-      fecha_pedido,
-      monto,
-      monto_pagado === undefined || monto_pagado === null ? null : monto_pagado,
-      estado_pago || 'pendiente',
-      medio_pago || null,
-      tipo_vianda || null,
-      descripcion || null,
-      fecha_entrega_desde || null,
-      fecha_entrega_hasta || null,
-      detalle_modificacion || null,
-    ]
-  );
-  return result.rows[0];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `INSERT INTO pedidos
+         (cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
+          fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING *`,
+      [
+        cliente_id,
+        fecha_pedido,
+        monto,
+        monto_pagado === undefined || monto_pagado === null ? null : monto_pagado,
+        estado_pago || 'pendiente',
+        medio_pago || null,
+        tipo_vianda || null,
+        descripcion || null,
+        fecha_entrega_desde || null,
+        fecha_entrega_hasta || null,
+        detalle_modificacion || null,
+        ubicacion_id || null,
+      ]
+    );
+    const pedido = result.rows[0];
+
+    if (lineas.length) await detalle.createMany(pedido.id, lineas, client);
+
+    await client.query('COMMIT');
+    return pedido;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Pedido + cliente + ubicación elegida + líneas con sus excepciones.
+// Es lo que consume la vista de edición del pedido y también el sync.
+async function getConDetalle(id) {
+  const r = await pool.query(`
+    SELECT
+      p.*,
+      c.nombre_completo AS cliente_nombre,
+      c.segmento        AS cliente_segmento,
+      c.tipo_envase     AS cliente_tipo_envase,
+      u.direccion       AS ubicacion_direccion,
+      u.zona            AS ubicacion_zona
+    FROM pedidos p
+    JOIN clientes c    ON c.id = p.cliente_id
+    LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
+    WHERE p.id = $1
+  `, [id]);
+  const pedido = r.rows[0];
+  if (!pedido) return null;
+
+  const lineas = await detalle.listByPedido(id);
+  const excepcionesPorLinea = await detalle.excepcionesPorLinea(id);
+  pedido.lineas = lineas.map(l => ({
+    ...l,
+    excepciones: excepcionesPorLinea.get(l.id) || [],
+  }));
+
+  return pedido;
 }
 
 module.exports = {
-  listByCliente, getById, create, listFiltered, updatePago,
+  listByCliente, getById, getConDetalle, create, listFiltered, updatePago,
   countRecepcionadas, countEntregadas, countCortesia, viandasPorTipoPorSemana,
-  update, cancelar, listAuditoria,
+  update, cancelar, listAuditoria, auditar,
 };

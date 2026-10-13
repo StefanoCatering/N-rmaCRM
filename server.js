@@ -10,6 +10,7 @@ const config = require('./config');       // también llama a dotenv.config()
 const usuarios = require('./models/usuarios');
 const clientesRouter = require('./routes/clientes');
 const pedidosRouter  = require('./routes/pedidos');
+const platosRouter   = require('./routes/platos');
 const exportRouter   = require('./routes/export');
 
 // Validación de arranque: JWT_SECRET es obligatorio
@@ -186,6 +187,7 @@ app.get('/pedidos', requireAuth(['admin', 'operador']), view('pedidos.html'));
 
 app.use('/api/clientes', requireAuth(), clientesRouter);
 app.use('/api/pedidos',  requireAuth(), pedidosRouter);
+app.use('/api/platos',   requireAuth(), platosRouter);
 app.use('/api/export',   requireAuth(), exportRouter);
 
 app.use((req, res) => {
