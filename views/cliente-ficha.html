@@ -320,6 +320,7 @@
           <div class="cliente-info-grid">
             <div class="cliente-info-item"><span class="form-label">Cédula</span><div class="cliente-info-value">${escapeHtml(c.cedula)}</div></div>
             ${c.empresa ? `<div class="cliente-info-item"><span class="form-label">Empresa</span><div class="cliente-info-value">${escapeHtml(c.empresa)}</div></div>` : ''}
+            <div class="cliente-info-item"><span class="form-label">Tipo de envase</span><div class="cliente-info-value">${escapeHtml(c.tipo_envase || 'Venezia')}</div></div>
             <div class="cliente-info-item"><span class="form-label">Email</span><div class="cliente-info-value">${c.email ? escapeHtml(c.email) : '—'}</div></div>
             <div class="cliente-info-item"><span class="form-label">Teléfono${c.telefono2 || c.telefono3 ? ' 1' : ''}</span><div class="cliente-info-value">${c.telefono ? escapeHtml(c.telefono) : '—'}</div></div>
             ${c.telefono2 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 2</span><div class="cliente-info-value">${escapeHtml(c.telefono2)}</div></div>` : ''}

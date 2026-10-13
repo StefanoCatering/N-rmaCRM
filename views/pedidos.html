@@ -48,7 +48,7 @@
           <select id="f-segmento">
             <option value="">Todos los segmentos</option>
             <option value="particular">Particular</option>
-            <option value="empresa">Empresa</option>
+            <option value="empresa">Corporativo</option>
             <option value="embajador">Embajador</option>
           </select>
           <select id="f-canal">
@@ -417,7 +417,7 @@
                         ${puedeEditar ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-monto-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>`
                       : ''}`}
                     </td>
-                    <td style="white-space:normal;">${p.descripcion ? escapeHtml(p.descripcion) : '—'}</td>
+                    <td style="white-space:normal;">${p.descripcion ? escapeHtml(p.descripcion) : '—'}<a href="/pedidos/${p.id}/editar" class="nota" style="display:block;margin-top:4px;">líneas y excepciones →</a></td>
                     ${esAdmin ? `<td style="white-space:nowrap;">
                       ${!p.cancelado ? `
                         <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>

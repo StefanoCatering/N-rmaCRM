@@ -68,8 +68,8 @@ async function existsCedula(cedula, excludeId = null) {
 async function create(data) {
   const result = await pool.query(`
     INSERT INTO clientes
-      (nombre_completo, cedula, email, telefono, telefono2, telefono3, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso, observaciones)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      (nombre_completo, cedula, email, telefono, telefono2, telefono3, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso, observaciones, tipo_envase)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     RETURNING id
   `, [
     data.nombre_completo,
@@ -85,6 +85,7 @@ async function create(data) {
     data.estado || 'activo',
     data.fecha_ingreso,
     data.observaciones || null,
+    data.tipo_envase || 'Venezia',
   ]);
   return getById(result.rows[0].id);
 }
@@ -104,8 +105,9 @@ async function update(id, data) {
       codigo_embajador = $10,
       fecha_ingreso    = $11,
       observaciones    = $12,
+      tipo_envase      = $13,
       updated_at       = NOW()
-    WHERE id = $13
+    WHERE id = $14
   `, [
     data.nombre_completo,
     data.cedula,
@@ -119,6 +121,7 @@ async function update(id, data) {
     data.canal_origen === 'embajador' ? (data.codigo_embajador || null) : null,
     data.fecha_ingreso,
     data.observaciones || null,
+    data.tipo_envase || 'Venezia',
     id,
   ]);
   return getById(id);

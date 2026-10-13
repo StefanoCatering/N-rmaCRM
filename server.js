@@ -10,6 +10,7 @@ const config = require('./config');       // también llama a dotenv.config()
 const usuarios = require('./models/usuarios');
 const clientesRouter = require('./routes/clientes');
 const pedidosRouter  = require('./routes/pedidos');
+const platosRouter   = require('./routes/platos');
 const exportRouter   = require('./routes/export');
 
 // Validación de arranque: JWT_SECRET es obligatorio
@@ -181,11 +182,15 @@ app.get('/clientes/:id/editar', requireAuth(['admin', 'operador']), view('client
 app.get('/clientes/:id', requireAuth(), view('cliente-ficha.html'));
 app.get('/pedidos/nuevo', requireAuth(['admin', 'operador']), view('pedido-form.html'));
 app.get('/pedidos', requireAuth(['admin', 'operador']), view('pedidos.html'));
+// Vista de edición del pedido: líneas, ubicación y excepciones por fecha.
+// Se registra después de /pedidos/nuevo para que esa ruta literal gane.
+app.get('/pedidos/:id/editar', requireAuth(['admin', 'operador']), view('pedido-detalle.html'));
 
 // ── API de negocio ────────────────────────────────────────────────
 
 app.use('/api/clientes', requireAuth(), clientesRouter);
 app.use('/api/pedidos',  requireAuth(), pedidosRouter);
+app.use('/api/platos',   requireAuth(), platosRouter);
 app.use('/api/export',   requireAuth(), exportRouter);
 
 app.use((req, res) => {

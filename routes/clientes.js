@@ -9,6 +9,7 @@ const router = express.Router();
 const SEGMENTOS = ['particular', 'empresa', 'embajador'];
 const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 const ESTADOS = ['activo', 'pausado', 'inactivo', 'baja'];
+const TIPOS_ENVASE = ['Narma', 'Venezia'];
 
 const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -83,6 +84,12 @@ function validarCliente(body, { partial = false } = {}) {
   data.observaciones = body.observaciones ? String(body.observaciones).trim().slice(0, 500) : null;
   data.codigo_embajador = body.codigo_embajador ? String(body.codigo_embajador).trim() : null;
   data.empresa = body.empresa ? String(body.empresa).trim() : null;
+
+  // tipo_envase: en qué envase se entrega. Default 'Venezia' (igual que el
+  // DEFAULT de la columna); los clientes de empresas con envase propio se
+  // cargan como 'Narma'.
+  data.tipo_envase = body.tipo_envase ? String(body.tipo_envase).trim() : 'Venezia';
+  if (!TIPOS_ENVASE.includes(data.tipo_envase)) errores.push('Tipo de envase inválido');
 
   if (data.canal_origen === 'embajador' && !data.codigo_embajador) {
     errores.push('El código de embajador es requerido cuando el canal es "embajador"');

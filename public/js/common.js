@@ -42,7 +42,8 @@ function initials(nombre) {
 }
 
 const ESTADO_LABEL = { activo: 'Activo', pausado: 'Pausado', inactivo: 'Inactivo', baja: 'Baja' };
-const SEGMENTO_LABEL = { particular: 'Particular', empresa: 'Empresa', embajador: 'Embajador' };
+// 'empresa' es el valor que vive en la base; "Corporativo" es solo la etiqueta visible.
+const SEGMENTO_LABEL = { particular: 'Particular', empresa: 'Corporativo', embajador: 'Embajador' };
 const CANAL_LABEL = {
   whatsapp: 'WhatsApp', redes: 'Redes sociales', embajador: 'Embajador',
   boca_a_boca: 'Boca a boca', b2b: 'B2B', otro: 'Otro',
