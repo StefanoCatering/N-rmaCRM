@@ -91,6 +91,10 @@ function renderNav(activeHref) {
   if (!cont || !CURRENT_USER) return;
 
   const links = [];
+  // Solo el operador: /inicio es requireAuth('operador'), para admin/visor daría 403.
+  if (CURRENT_USER.rol === 'operador') {
+    links.push(['/inicio', 'Inicio']);
+  }
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor') {
     links.push(['/dashboard', 'Dashboard']);
   }
