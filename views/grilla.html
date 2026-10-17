@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · grilla de comedor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">grilla de comedor</div>
+          <div class="view-header-sub" id="sub-header">Cargando...</div>
+        </div>
+      </div>
+
+      <div id="alerta-proxima" class="alerta-banner hidden"></div>
+      <div id="aviso-lectura" class="nota hidden">
+        Estás viendo la grilla en modo lectura. La edita solo quien tiene el permiso de gestión.
+      </div>
+      <div id="aviso-sync" class="form-error hidden"></div>
+      <div id="error-global" class="form-error hidden"></div>
+
+      <!-- Selector de empresa y semana -->
+      <div class="card">
+        <div class="filter-row">
+          <select id="f-empresa" title="Empresa"></select>
+          <input type="date" id="f-lunes" title="Lunes de la semana"/>
+          <input type="text" id="f-buscar" placeholder="Buscar colaborador por nombre o cédula..."/>
+        </div>
+        <div class="btn-row mt-8" style="flex-wrap:wrap;">
+          <button class="btn-secondary" id="btn-semana-prev" style="font-size:11px;">← Semana anterior</button>
+          <button class="btn-secondary" id="btn-semana-hoy" style="font-size:11px;">Semana actual</button>
+          <button class="btn-secondary" id="btn-semana-next" style="font-size:11px;">Semana siguiente →</button>
+          <button class="btn-secondary" id="btn-alta" style="font-size:11px;">+ Sumar colaboradores</button>
+        </div>
+      </div>
+
+      <!-- Grilla colaborador × lun-vie -->
+      <div class="card">
+        <div class="card-title">colaboradores</div>
+        <div class="nota">
+          Sin marcar nada, cada colaborador recibe su plato base todos los días hábiles.
+          Hacé clic en una celda para marcar un cambio de plato o una ausencia.
+          Los días anteriores a hoy son de solo lectura.
+        </div>
+        <div id="tabla-cont"><div class="empty-state">Cargando...</div></div>
+      </div>
+
+      <!-- Pedido general -->
+      <div class="card">
+        <div class="card-title">pedido general</div>
+        <div class="nota">Lo que no va por persona: sopa, ensalada mixta, jugo, vinagreta. Cantidad total por día.</div>
+        <div id="tabla-general"></div>
+      </div>
+
+      <!-- Totales -->
+      <div class="card">
+        <div class="card-title">totales que van a cocina</div>
+        <div class="nota">Calculados en el servidor a partir de la grilla. Es exactamente lo que se envía: por plato y día, sin nombres.</div>
+        <div id="tabla-totales"></div>
+      </div>
+
+      <!-- Envío -->
+      <div class="card">
+        <div class="card-title">envío a cocina</div>
+        <div id="estado-envio"></div>
+        <div class="btn-row mt-12">
+          <button class="btn-primary" id="btn-enviar">Enviar semana a cocina</button>
+          <button class="btn-secondary hidden" id="btn-reintentar">Reintentar sincronización</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal celda: cambio de plato, ausencia, o rango de fechas -->
+  <div id="modal-celda" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:440px;width:100%;max-height:92vh;overflow:auto;">
+      <div class="card-title" id="modal-celda-titulo">celda</div>
+      <div class="nota" id="modal-celda-sub"></div>
+
+      <div class="form-group">
+        <label class="form-label">Qué pasa ese día</label>
+        <select id="modal-celda-tipo">
+          <option value="plato">Come otro plato</option>
+          <option value="ausencia">No come (ausencia)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="grupo-plato">
+        <label class="form-label">Plato</label>
+        <select id="modal-celda-plato"></select>
+      </div>
+
+      <div class="form-group hidden" id="grupo-ausencia">
+        <label class="form-label">Motivo de la ausencia</label>
+        <select id="modal-celda-ausencia">
+          <option value="home_office">Home office</option>
+          <option value="vacaciones">Vacaciones</option>
+          <option value="reposo">Reposo</option>
+          <option value="licencia">Licencia</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Comentario (opcional)</label>
+        <input type="text" id="modal-celda-comentario" placeholder="Ej: avisó a última hora"/>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label"><input type="checkbox" id="modal-celda-rango"/> Aplicar a un rango de fechas (vacaciones, licencia)</label>
+      </div>
+      <div class="form-row hidden" id="grupo-rango">
+        <div class="form-group">
+          <label class="form-label">Desde</label>
+          <input type="date" id="modal-celda-desde"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hasta</label>
+          <input type="date" id="modal-celda-hasta"/>
+        </div>
+      </div>
+
+      <div id="modal-celda-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-celda-guardar">Guardar</button>
+        <button class="btn-secondary" id="modal-celda-base">Volver al plato base</button>
+        <button class="btn-secondary" id="modal-celda-cerrar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal plan: plato base, observación y baja -->
+  <div id="modal-plan" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:420px;width:100%;max-height:92vh;overflow:auto;">
+      <div class="card-title" id="modal-plan-titulo">plan del colaborador</div>
+      <div class="form-group">
+        <label class="form-label">Plato base</label>
+        <select id="modal-plan-plato"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Observación fija (opcional)</label>
+        <input type="text" id="modal-plan-observacion" placeholder="Ej: no consume cerdo"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Fecha de baja</label>
+        <input type="date" id="modal-plan-baja"/>
+        <div class="nota mt-8">Es el primer día que ya NO come. Dejala vacía si sigue en el comedor.</div>
+      </div>
+      <div id="modal-plan-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-plan-guardar">Guardar</button>
+        <button class="btn-secondary" id="modal-plan-cerrar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal alta de colaboradores -->
+  <div id="modal-alta" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:520px;width:100%;max-height:92vh;overflow:auto;">
+      <div class="card-title">sumar colaboradores al comedor</div>
+      <div class="nota" id="modal-alta-sub"></div>
+      <div class="form-group">
+        <label class="form-label">Buscar</label>
+        <input type="text" id="modal-alta-buscar" placeholder="Nombre o cédula..."/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Clientes de la empresa sin plan</label>
+        <div id="modal-alta-lista" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:8px;">
+          <div class="empty-state">Cargando...</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Plato base</label>
+          <select id="modal-alta-plato"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fecha de alta</label>
+          <input type="date" id="modal-alta-fecha"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Observación fija (opcional, se aplica a todos)</label>
+        <input type="text" id="modal-alta-observacion" placeholder="Ej: no consume cerdo"/>
+      </div>
+      <div id="modal-alta-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-alta-guardar">Dar de alta</button>
+        <button class="btn-secondary" id="modal-alta-cerrar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal día sin servicio -->
+  <div id="modal-sin-servicio" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
+    <div class="card" style="max-width:380px;width:100%;">
+      <div class="card-title">día sin servicio</div>
+      <div class="nota" id="modal-ss-sub"></div>
+      <div class="form-group">
+        <label class="form-label">Motivo</label>
+        <input type="text" id="modal-ss-motivo" placeholder="Ej: feriado"/>
+      </div>
+      <div id="modal-ss-error" class="form-error hidden"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="modal-ss-guardar">Marcar sin servicio</button>
+        <button class="btn-secondary" id="modal-ss-cerrar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+    let EMPRESAS = [];
+    let CATALOGO = [];     // /api/platos — ya viene sin la categoría 'General'
+    let DATOS = null;      // /api/grilla/semana de la empresa y semana actuales
+    let empresaActual = '';
+    let lunesActual = '';
+    let filtroTexto = '';
+    let celdaCtx = null;   // { cliente_id, nombre, fecha, dia }
+    let planCtx = null;    // colaborador cuyo plan se está editando
+    let ssCtx = null;      // fecha que se está marcando sin servicio
+    let candidatos = [];
+
+    (async function () {
+      await ensureSession();
+      renderNav('/grilla');
+
+      try {
+        const [{ categorias }, { empresas }] = await Promise.all([
+          api('/api/platos'),
+          api('/api/grilla/empresas'),
+        ]);
+        CATALOGO = categorias;
+        EMPRESAS = empresas;
+      } catch (e) {
+        mostrarError('No se pudo cargar la configuración de la grilla: ' + e.message);
+        return;
+      }
+
+      if (!EMPRESAS.length) {
+        document.getElementById('sub-header').textContent = 'Sin empresas configuradas';
+        mostrarError('Todavía no hay ninguna empresa con grilla de comedor configurada (tabla grilla_empresas).');
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const empresaUrl = params.get('empresa');
+      empresaActual = EMPRESAS.some(e => e.empresa === empresaUrl) ? empresaUrl : EMPRESAS[0].empresa;
+      lunesActual = params.get('lunes') || '';
+
+      const selEmpresa = document.getElementById('f-empresa');
+      selEmpresa.innerHTML = EMPRESAS
+        .map(e => `<option value="${escapeHtml(e.empresa)}">${escapeHtml(e.empresa)}</option>`).join('');
+      selEmpresa.value = empresaActual;
+
+      selEmpresa.addEventListener('change', () => {
+        empresaActual = selEmpresa.value;
+        cargar();
+      });
+      document.getElementById('f-lunes').addEventListener('change', (ev) => {
+        // El input devuelve cualquier día: se normaliza al lunes de esa semana.
+        if (ev.target.value) { lunesActual = lunesDe(ev.target.value); cargar(); }
+      });
+      document.getElementById('btn-semana-prev').addEventListener('click', () => { lunesActual = sumarDias(lunesActual, -7); cargar(); });
+      document.getElementById('btn-semana-next').addEventListener('click', () => { lunesActual = sumarDias(lunesActual, 7); cargar(); });
+      document.getElementById('btn-semana-hoy').addEventListener('click', () => { lunesActual = ''; cargar(); });
+      document.getElementById('btn-alta').addEventListener('click', abrirAlta);
+      document.getElementById('btn-enviar').addEventListener('click', enviarSemana);
+      document.getElementById('btn-reintentar').addEventListener('click', reintentarSync);
+
+      let timerBuscar = null;
+      document.getElementById('f-buscar').addEventListener('input', (ev) => {
+        clearTimeout(timerBuscar);
+        timerBuscar = setTimeout(() => { filtroTexto = ev.target.value.trim().toLowerCase(); renderTabla(); }, 200);
+      });
+
+      // Modales
+      document.getElementById('modal-celda-cerrar').addEventListener('click', () => cerrar('modal-celda'));
+      document.getElementById('modal-celda-guardar').addEventListener('click', guardarCelda);
+      document.getElementById('modal-celda-base').addEventListener('click', volverABase);
+      document.getElementById('modal-celda-tipo').addEventListener('change', toggleTipoCelda);
+      document.getElementById('modal-celda-rango').addEventListener('change', toggleRango);
+      document.getElementById('modal-plan-cerrar').addEventListener('click', () => cerrar('modal-plan'));
+      document.getElementById('modal-plan-guardar').addEventListener('click', guardarPlan);
+      document.getElementById('modal-alta-cerrar').addEventListener('click', () => cerrar('modal-alta'));
+      document.getElementById('modal-alta-guardar').addEventListener('click', guardarAlta);
+      document.getElementById('modal-ss-cerrar').addEventListener('click', () => cerrar('modal-sin-servicio'));
+      document.getElementById('modal-ss-guardar').addEventListener('click', guardarSinServicio);
+
+      let timerCand = null;
+      document.getElementById('modal-alta-buscar').addEventListener('input', () => {
+        clearTimeout(timerCand);
+        timerCand = setTimeout(cargarCandidatos, 250);
+      });
+
+      await cargar();
+    })();
+
+    // ── Utilidades ───────────────────────────────────────────────
+    // Misma aritmética de fechas que el backend: todo en UTC sobre strings
+    // 'YYYY-MM-DD', para que no se corra un día según el huso del navegador.
+
+    function msUTC(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return Date.UTC(y, m - 1, d);
+    }
+    function isoUTC(ms) {
+      const dt = new Date(ms);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+    }
+    function sumarDias(iso, n) { return isoUTC(msUTC(iso) + n * 86400000); }
+    function diaSemana(iso) { return new Date(msUTC(iso)).getUTCDay(); }
+    function lunesDe(iso) {
+      const d = diaSemana(iso);
+      return sumarDias(iso, d === 0 ? -6 : 1 - d);
+    }
+
+    function puedeEditar() { return !!(DATOS && DATOS.puede_editar); }
+    function esPasado(fecha) { return !!DATOS && fecha < DATOS.hoy; }
+    function editable(fecha) { return puedeEditar() && !esPasado(fecha); }
+
+    function mostrarError(msg) {
+      const box = document.getElementById('error-global');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+    function limpiarError() { document.getElementById('error-global').classList.add('hidden'); }
+    function cerrar(id) { document.getElementById(id).classList.add('hidden'); }
+
+    // Avisa cuando el CRM guardó pero el espejado hacia Narma Pedidos falló:
+    // el cambio NO se deshace, pero producción no se enteró.
+    function avisarSync(sync) {
+      const box = document.getElementById('aviso-sync');
+      if (sync && sync.ok === false) {
+        box.textContent = 'El cambio se guardó en el CRM, pero NO se pudo sincronizar con Narma Pedidos'
+          + (sync.motivo === 'sync_deshabilitado' ? ' (la conexión no está configurada).' : '.')
+          + ' Quedó registrado en sync_errores. Probá "Reintentar sincronización" y, si sigue fallando, avisá a producción por otro canal.';
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+
+    // Una escritura puede haber disparado el reenvío de varias semanas.
+    function avisarEnvios(envios) {
+      const fallido = (envios || []).find(e => e.ok === false || (e.sync && e.sync.ok === false));
+      avisarSync(fallido ? (fallido.sync || { ok: false }) : null);
+    }
+
+    function opcionesPlatos(seleccionado) {
+      return CATALOGO.map(c => `
+        <optgroup label="${escapeHtml(c.categoria)}">
+          ${c.platos.map(p => `<option value="${p.id}"${Number(seleccionado) === p.id ? ' selected' : ''}>${escapeHtml(p.etiqueta)}</option>`).join('')}
+        </optgroup>`).join('');
+    }
+
+    function etiquetaDia(fecha) {
+      return `${DIAS_CORTOS[diaSemana(fecha)]} ${fecha.slice(8, 10)}/${fecha.slice(5, 7)}`;
+    }
+
+    // ── Carga ────────────────────────────────────────────────────
+
+    async function cargar() {
+      limpiarError();
+      document.getElementById('tabla-cont').innerHTML = '<div class="empty-state">Cargando...</div>';
+
+      const params = new URLSearchParams({ empresa: empresaActual });
+      if (lunesActual) params.set('lunes', lunesActual);
+
+      try {
+        DATOS = await api('/api/grilla/semana?' + params.toString());
+      } catch (e) {
+        mostrarError('No se pudo cargar la semana: ' + e.message);
+        return;
+      }
+
+      lunesActual = DATOS.lunes;
+      document.getElementById('f-lunes').value = lunesActual;
+      document.getElementById('f-empresa').value = DATOS.empresa;
+      document.getElementById('aviso-lectura').classList.toggle('hidden', puedeEditar());
+      document.getElementById('btn-alta').classList.toggle('hidden', !puedeEditar());
+
+      document.getElementById('sub-header').textContent =
+        `${DATOS.empresa} · semana del ${fmtFecha(DATOS.dias[0])} al ${fmtFecha(DATOS.dias[4])}`
+        + ` · pedido a nombre de ${DATOS.cliente_pedido.nombre} (envase ${DATOS.cliente_pedido.tipo_envase})`;
+
+      // Mantener la empresa y la semana en la URL: recargar o compartir el
+      // link cae en la misma pantalla.
+      const url = new URL(window.location.href);
+      url.searchParams.set('empresa', DATOS.empresa);
+      url.searchParams.set('lunes', DATOS.lunes);
+      window.history.replaceState({}, '', url);
+
+      renderAvisoProxima();
+      renderTabla();
+      renderGeneral();
+      renderTotales();
+      renderEnvio();
+    }
+
+    function renderAvisoProxima() {
+      const box = document.getElementById('alerta-proxima');
+      const aviso = DATOS.aviso_proxima_semana;
+      if (!aviso || !aviso.mostrar) { box.classList.add('hidden'); return; }
+      box.innerHTML = `Ya es jueves y la semana del ${fmtFecha(aviso.lunes)} todavía no se envió a cocina. `
+        + `<a href="/grilla?empresa=${encodeURIComponent(DATOS.empresa)}&lunes=${encodeURIComponent(aviso.lunes)}"><strong>Ir a esa semana →</strong></a>`;
+      box.classList.remove('hidden');
+    }
+
+    // ── Grilla ───────────────────────────────────────────────────
+
+    function renderTabla() {
+      const cont = document.getElementById('tabla-cont');
+      const dias = DATOS.dias;
+
+      const visibles = DATOS.colaboradores.filter(c => {
+        if (!filtroTexto) return true;
+        return (c.nombre_completo || '').toLowerCase().includes(filtroTexto)
+            || (c.cedula || '').toLowerCase().includes(filtroTexto);
+      });
+
+      if (!DATOS.colaboradores.length) {
+        cont.innerHTML = '<div class="empty-state">Ningún colaborador de esta empresa tiene plan activo en esta semana.</div>';
+        return;
+      }
+      if (!visibles.length) {
+        cont.innerHTML = '<div class="empty-state">Ningún colaborador coincide con la búsqueda.</div>';
+        return;
+      }
+
+      const encabezados = dias.map(fecha => {
+        const sinServicio = Object.prototype.hasOwnProperty.call(DATOS.dias_sin_servicio, fecha);
+        const puedeTocar = editable(fecha);
+        return `
+          <th class="grilla-col-dia grilla-dia-head${fecha === DATOS.hoy ? ' grilla-dia-hoy' : ''}">
+            <div class="grilla-dia-nombre">${etiquetaDia(fecha)}</div>
+            <div class="grilla-dia-fecha">${sinServicio ? 'sin servicio' : ''}</div>
+            <div class="grilla-dia-acciones">
+              <a class="grilla-mini" href="/grilla/dia?empresa=${encodeURIComponent(DATOS.empresa)}&fecha=${fecha}" title="Hoja del día">hoja</a>
+              ${puedeTocar ? `<button type="button" class="grilla-mini btn-sin-servicio" data-fecha="${fecha}" data-activo="${sinServicio ? '1' : '0'}">${sinServicio ? 'reactivar' : 'sin servicio'}</button>` : ''}
+            </div>
+          </th>`;
+      }).join('');
+
+      const filas = visibles.map(col => {
+        const celdas = dias.map(fecha => {
+          const sinServicio = Object.prototype.hasOwnProperty.call(DATOS.dias_sin_servicio, fecha);
+          return `<td class="${sinServicio ? 'grilla-td-sin-servicio' : ''}">${celdaHtml(col, fecha, sinServicio)}</td>`;
+        }).join('');
+
+        const acciones = puedeEditar() ? `
+          <button type="button" class="grilla-mini btn-rango" data-cliente="${col.cliente_id}">rango</button>
+          <button type="button" class="grilla-mini btn-plan" data-cliente="${col.cliente_id}">plan</button>` : '';
+
+        return `
+          <tr>
+            <td class="grilla-col-nombre">
+              <div class="grilla-nombre">${escapeHtml(col.nombre_completo)}</div>
+              <div class="grilla-sub">base: ${escapeHtml(col.plato_base_nombre)}${col.fecha_baja ? ` · baja ${fmtFecha(col.fecha_baja)}` : ''}</div>
+              ${col.observacion ? `<div class="grilla-obs">${escapeHtml(col.observacion)}</div>` : ''}
+            </td>
+            ${celdas}
+            <td class="grilla-col-acc">${acciones}</td>
+          </tr>`;
+      }).join('');
+
+      cont.innerHTML = `
+        <div class="table-wrap">
+          <table class="grilla-tabla">
+            <thead><tr><th class="grilla-col-nombre">Colaborador</th>${encabezados}<th class="grilla-col-acc"></th></tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+        <div class="nota mt-12">
+          Mostrando ${visibles.length} de ${DATOS.colaboradores.length} colaboradores.
+          Gris = plato base · Azul = cambio de plato · Naranja = ausencia.
+        </div>`;
+
+      cont.querySelectorAll('.grilla-celda[data-cliente]').forEach(btn => {
+        btn.addEventListener('click', () => abrirCelda(Number(btn.dataset.cliente), btn.dataset.fecha));
+      });
+      cont.querySelectorAll('.btn-rango').forEach(btn => {
+        btn.addEventListener('click', () => abrirCelda(Number(btn.dataset.cliente), null, { rango: true }));
+      });
+      cont.querySelectorAll('.btn-plan').forEach(btn => {
+        btn.addEventListener('click', () => abrirPlan(Number(btn.dataset.cliente)));
+      });
+      cont.querySelectorAll('.btn-sin-servicio').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (btn.dataset.activo === '1') quitarSinServicio(btn.dataset.fecha);
+          else abrirSinServicio(btn.dataset.fecha);
+        });
+      });
+    }
+
+    function celdaHtml(col, fecha, sinServicio) {
+      if (sinServicio) return '<span class="grilla-sin-servicio-texto">—</span>';
+
+      const dia = col.dias[fecha];
+      if (!dia || dia.estado === 'fuera_de_plan') {
+        return '<span class="grilla-celda grilla-celda-fuera">fuera de plan</span>';
+      }
+
+      const puedeTocar = editable(fecha);
+      let clase = 'grilla-celda-base';
+      let texto = dia.plato_nombre;
+      if (dia.estado === 'ausencia') {
+        clase = 'grilla-celda-ausencia';
+        texto = AUSENCIA_LABEL[dia.ausencia] || dia.ausencia;
+      } else if (dia.estado === 'cambio') {
+        clase = 'grilla-celda-cambio';
+      }
+
+      const nota = dia.comentario ? `<span class="grilla-celda-nota">${escapeHtml(dia.comentario)}</span>` : '';
+      return `<button type="button" class="grilla-celda ${clase}${puedeTocar ? '' : ' grilla-celda-bloqueada'}"
+          data-cliente="${col.cliente_id}" data-fecha="${fecha}"${puedeTocar ? '' : ' disabled'}>${escapeHtml(texto)}${nota}</button>`;
+    }
+
+    // ── Pedido general ───────────────────────────────────────────
+
+    function renderGeneral() {
+      const cont = document.getElementById('tabla-general');
+      const dias = DATOS.dias;
+
+      if (!DATOS.catalogo_general.length) {
+        cont.innerHTML = '<div class="empty-state">No hay ítems de pedido general cargados en el catálogo (categoría "General" de la tabla platos).</div>';
+        return;
+      }
+
+      const porPlato = new Map(DATOS.general.map(g => [g.plato_id, g]));
+
+      const filas = DATOS.catalogo_general.map(item => {
+        const fila = porPlato.get(item.id);
+        const celdas = dias.map(fecha => {
+          const sinServicio = Object.prototype.hasOwnProperty.call(DATOS.dias_sin_servicio, fecha);
+          const valor = fila && fila.cantidades[fecha] !== undefined ? fila.cantidades[fecha] : '';
+          const puedeTocar = editable(fecha) && !sinServicio;
+          return `<td class="${sinServicio ? 'grilla-td-sin-servicio' : ''}">
+            <input type="number" min="0" step="1" class="grilla-input-cant g-cant"
+              data-plato="${item.id}" data-fecha="${fecha}" value="${valor}"
+              placeholder="0"${puedeTocar ? '' : ' disabled'}/>
+          </td>`;
+        }).join('');
+        return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(item.etiqueta)}</div></td>${celdas}<td class="grilla-col-acc"></td></tr>`;
+      }).join('');
+
+      cont.innerHTML = `
+        <div class="table-wrap">
+          <table class="grilla-tabla">
+            <thead><tr><th class="grilla-col-nombre">Ítem</th>${dias.map(f => `<th class="grilla-col-dia grilla-dia-head"><div class="grilla-dia-nombre">${etiquetaDia(f)}</div></th>`).join('')}<th class="grilla-col-acc"></th></tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>`;
+
+      cont.querySelectorAll('.g-cant').forEach(input => {
+        input.addEventListener('change', () => guardarGeneral(input));
+      });
+    }
+
+    async function guardarGeneral(input) {
+      const cantidad = input.value === '' ? 0 : parseInt(input.value, 10);
+      if (!Number.isInteger(cantidad) || cantidad < 0) {
+        mostrarError('La cantidad del pedido general debe ser un número entero mayor o igual a 0.');
+        return;
+      }
+      limpiarError();
+      input.disabled = true;
+      try {
+        const r = await api('/api/grilla/general', {
+          method: 'PUT',
+          body: { empresa: DATOS.empresa, fecha: input.dataset.fecha, plato_id: Number(input.dataset.plato), cantidad },
+        });
+        avisarEnvios(r.envios);
+        await cargar();
+      } catch (e) {
+        mostrarError(e.message);
+        input.disabled = false;
+      }
+    }
+
+    // ── Totales ──────────────────────────────────────────────────
+
+    function renderTotales() {
+      const cont = document.getElementById('tabla-totales');
+      const dias = DATOS.dias;
+
+      if (!DATOS.totales.length) {
+        cont.innerHTML = '<div class="empty-state">Esta semana no produce nada todavía.</div>';
+        return;
+      }
+
+      const filas = DATOS.totales.map(t => {
+        const celdas = dias.map(f => {
+          const n = t.por_dia[f] || 0;
+          return `<td class="grilla-total${n ? '' : ' grilla-total-cero'}">${n || '—'}</td>`;
+        }).join('');
+        return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(t.plato_nombre)}</div></td>${celdas}<td class="grilla-total">${t.total}</td></tr>`;
+      }).join('');
+
+      const totalSemana = dias.reduce((n, f) => n + (DATOS.totales_por_dia[f] || 0), 0);
+      const pie = dias.map(f => `<td class="grilla-total">${DATOS.totales_por_dia[f] || 0}</td>`).join('');
+
+      cont.innerHTML = `
+        <div class="table-wrap">
+          <table class="grilla-tabla">
+            <thead><tr><th class="grilla-col-nombre">Plato</th>${dias.map(f => `<th class="grilla-col-dia grilla-dia-head"><div class="grilla-dia-nombre">${etiquetaDia(f)}</div></th>`).join('')}<th class="grilla-col-acc">Total</th></tr></thead>
+            <tbody>${filas}</tbody>
+            <tfoot><tr class="grilla-fila-total"><td>Total del día</td>${pie}<td class="grilla-total">${totalSemana}</td></tr></tfoot>
+          </table>
+        </div>`;
+    }
+
+    // ── Envío ────────────────────────────────────────────────────
+
+    function renderEnvio() {
+      const cont = document.getElementById('estado-envio');
+      const envio = DATOS.envio;
+      const btnEnviar = document.getElementById('btn-enviar');
+      const btnReintentar = document.getElementById('btn-reintentar');
+
+      btnEnviar.disabled = !puedeEditar() || DATOS.semana_terminada;
+      btnEnviar.textContent = envio.enviada ? 'Reenviar semana a cocina' : 'Enviar semana a cocina';
+
+      if (!envio.enviada) {
+        cont.innerHTML = DATOS.semana_terminada
+          ? '<div class="empty-state">Esta semana ya terminó y nunca se envió a cocina.</div>'
+          : '<div class="empty-state">Esta semana todavía no se envió a cocina.</div>';
+        btnReintentar.classList.add('hidden');
+        return;
+      }
+
+      const ultimo = envio.ultimo || {};
+      const sync = ultimo.sync || {};
+      const fallo = sync.ok === false;
+
+      cont.innerHTML = `
+        <div style="font-size:11px;">
+          <span class="badge ${fallo ? 'badge-danger' : 'badge-success'}">${fallo ? 'sincronización fallida' : 'enviada'}</span>
+          <span class="text-muted">Pedido <a href="/pedidos/${envio.pedido_id}/editar">#${envio.pedido_id}</a></span>
+          ${ultimo.fecha ? `<span class="text-muted"> · último envío ${fmtFecha(String(ultimo.fecha).slice(0, 10))}${ultimo.usuario ? ' por ' + escapeHtml(ultimo.usuario) : ''}</span>` : ''}
+        </div>
+        ${fallo ? `<div class="nota mt-8">El pedido está guardado en el CRM, pero no se pudo espejar hacia Narma Pedidos${sync.error ? ': ' + escapeHtml(sync.error) : '.'}</div>` : ''}`;
+
+      btnReintentar.classList.toggle('hidden', !fallo || !puedeEditar());
+    }
+
+    async function enviarSemana() {
+      const btn = document.getElementById('btn-enviar');
+      limpiarError();
+      btn.disabled = true;
+      btn.textContent = 'Enviando...';
+      try {
+        const r = await api('/api/grilla/enviar', { method: 'POST', body: { empresa: DATOS.empresa, lunes: DATOS.lunes } });
+        avisarSync(r.sync);
+        await cargar();
+      } catch (e) {
+        mostrarError(e.message);
+        btn.disabled = false;
+      }
+    }
+
+    async function reintentarSync() {
+      const btn = document.getElementById('btn-reintentar');
+      limpiarError();
+      btn.disabled = true;
+      try {
+        const r = await api('/api/grilla/reintentar-sync', { method: 'POST', body: { empresa: DATOS.empresa, lunes: DATOS.lunes } });
+        avisarSync(r.sync);
+        await cargar();
+      } catch (e) {
+        mostrarError(e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── Modal de celda ───────────────────────────────────────────
+
+    function abrirCelda(clienteId, fecha, { rango = false } = {}) {
+      const col = DATOS.colaboradores.find(c => c.cliente_id === clienteId);
+      if (!col) return;
+
+      // Desde el botón "rango" no hay fecha: se arranca en el primer día
+      // editable de la semana.
+      const fechaBase = fecha || DATOS.dias.find(f => editable(f)) || DATOS.dias[0];
+      const dia = col.dias[fechaBase] || {};
+      celdaCtx = { cliente_id: clienteId, nombre: col.nombre_completo, fecha: fechaBase, dia, col };
+
+      document.getElementById('modal-celda-titulo').textContent = rango ? 'marcar un rango' : 'marcar el día';
+      document.getElementById('modal-celda-sub').textContent =
+        `${col.nombre_completo} · ${rango ? 'desde ' + fmtFecha(fechaBase) : fmtFecha(fechaBase)} · plato base: ${col.plato_base_nombre}`;
+
+      const esAusencia = dia.estado === 'ausencia';
+      document.getElementById('modal-celda-tipo').value = esAusencia ? 'ausencia' : 'plato';
+      document.getElementById('modal-celda-ausencia').value = esAusencia ? dia.ausencia : 'home_office';
+      document.getElementById('modal-celda-plato').innerHTML =
+        opcionesPlatos(dia.estado === 'cambio' ? dia.plato_id : col.plato_base_id);
+      document.getElementById('modal-celda-comentario').value = dia.comentario || '';
+
+      document.getElementById('modal-celda-rango').checked = rango;
+      document.getElementById('modal-celda-desde').value = fechaBase;
+      document.getElementById('modal-celda-hasta').value = DATOS.dias[DATOS.dias.length - 1];
+      // Volver al plato base solo tiene sentido si hay algo marcado ese día.
+      document.getElementById('modal-celda-base').classList.toggle('hidden', rango || !dia.celda_id);
+
+      toggleTipoCelda();
+      toggleRango();
+      document.getElementById('modal-celda-error').classList.add('hidden');
+      document.getElementById('modal-celda').classList.remove('hidden');
+    }
+
+    function toggleTipoCelda() {
+      const esAusencia = document.getElementById('modal-celda-tipo').value === 'ausencia';
+      document.getElementById('grupo-plato').classList.toggle('hidden', esAusencia);
+      document.getElementById('grupo-ausencia').classList.toggle('hidden', !esAusencia);
+    }
+
+    function toggleRango() {
+      const activo = document.getElementById('modal-celda-rango').checked;
+      document.getElementById('grupo-rango').classList.toggle('hidden', !activo);
+      document.getElementById('modal-celda-base').classList.toggle('hidden', activo || !celdaCtx || !celdaCtx.dia.celda_id);
+    }
+
+    function cuerpoCelda() {
+      const esAusencia = document.getElementById('modal-celda-tipo').value === 'ausencia';
+      const comentario = document.getElementById('modal-celda-comentario').value.trim() || null;
+      return esAusencia
+        ? { ausencia: document.getElementById('modal-celda-ausencia').value, comentario }
+        : { plato_id: Number(document.getElementById('modal-celda-plato').value), comentario };
+    }
+
+    async function guardarCelda() {
+      const errorBox = document.getElementById('modal-celda-error');
+      const btn = document.getElementById('modal-celda-guardar');
+      errorBox.classList.add('hidden');
+
+      const esRango = document.getElementById('modal-celda-rango').checked;
+      const base = { empresa: DATOS.empresa, cliente_id: celdaCtx.cliente_id, ...cuerpoCelda() };
+
+      btn.disabled = true;
+      try {
+        let r;
+        if (esRango) {
+          r = await api('/api/grilla/celda/rango', {
+            method: 'PUT',
+            body: {
+              ...base,
+              desde: document.getElementById('modal-celda-desde').value,
+              hasta: document.getElementById('modal-celda-hasta').value,
+            },
+          });
+        } else {
+          r = await api('/api/grilla/celda', { method: 'PUT', body: { ...base, fecha: celdaCtx.fecha } });
+        }
+        avisarEnvios(r.envios);
+        cerrar('modal-celda');
+        await cargar();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function volverABase() {
+      const errorBox = document.getElementById('modal-celda-error');
+      const btn = document.getElementById('modal-celda-base');
+      errorBox.classList.add('hidden');
+      btn.disabled = true;
+      try {
+        const qs = new URLSearchParams({
+          empresa: DATOS.empresa, cliente_id: String(celdaCtx.cliente_id), fecha: celdaCtx.fecha,
+        });
+        const r = await api('/api/grilla/celda?' + qs.toString(), { method: 'DELETE' });
+        avisarEnvios(r.envios);
+        cerrar('modal-celda');
+        await cargar();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── Modal de plan ────────────────────────────────────────────
+
+    function abrirPlan(clienteId) {
+      const col = DATOS.colaboradores.find(c => c.cliente_id === clienteId);
+      if (!col) return;
+      planCtx = col;
+
+      document.getElementById('modal-plan-titulo').textContent = 'plan de ' + col.nombre_completo;
+      document.getElementById('modal-plan-plato').innerHTML = opcionesPlatos(col.plato_base_id);
+      document.getElementById('modal-plan-observacion').value = col.observacion || '';
+      document.getElementById('modal-plan-baja').value = col.fecha_baja || '';
+      document.getElementById('modal-plan-error').classList.add('hidden');
+      document.getElementById('modal-plan').classList.remove('hidden');
+    }
+
+    async function guardarPlan() {
+      const errorBox = document.getElementById('modal-plan-error');
+      const btn = document.getElementById('modal-plan-guardar');
+      errorBox.classList.add('hidden');
+      btn.disabled = true;
+      try {
+        const r = await api('/api/grilla/planes/' + planCtx.cliente_id, {
+          method: 'PATCH',
+          body: {
+            empresa: DATOS.empresa,
+            plato_base_id: Number(document.getElementById('modal-plan-plato').value),
+            observacion: document.getElementById('modal-plan-observacion').value.trim() || null,
+            fecha_baja: document.getElementById('modal-plan-baja').value || null,
+          },
+        });
+        avisarEnvios(r.envios);
+        cerrar('modal-plan');
+        await cargar();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── Modal de alta ────────────────────────────────────────────
+
+    function abrirAlta() {
+      document.getElementById('modal-alta-sub').textContent =
+        `Clientes cargados en ${DATOS.empresa} que todavía no están en el comedor.`;
+      document.getElementById('modal-alta-plato').innerHTML = opcionesPlatos(null);
+      document.getElementById('modal-alta-fecha').value = DATOS.hoy;
+      document.getElementById('modal-alta-observacion').value = '';
+      document.getElementById('modal-alta-buscar').value = '';
+      document.getElementById('modal-alta-error').classList.add('hidden');
+      document.getElementById('modal-alta').classList.remove('hidden');
+      cargarCandidatos();
+    }
+
+    async function cargarCandidatos() {
+      const cont = document.getElementById('modal-alta-lista');
+      const q = document.getElementById('modal-alta-buscar').value.trim();
+      cont.innerHTML = '<div class="empty-state">Cargando...</div>';
+      try {
+        const params = new URLSearchParams({ empresa: DATOS.empresa });
+        if (q) params.set('q', q);
+        candidatos = (await api('/api/grilla/candidatos?' + params.toString())).candidatos;
+      } catch (e) {
+        cont.innerHTML = '<div class="empty-state">No se pudieron cargar los candidatos.</div>';
+        return;
+      }
+
+      if (!candidatos.length) {
+        cont.innerHTML = '<div class="empty-state">No quedan clientes de esta empresa fuera del comedor.</div>';
+        return;
+      }
+
+      cont.innerHTML = candidatos.map(c => `
+        <label style="display:block;padding:4px 2px;font-size:11px;">
+          <input type="checkbox" class="cand" value="${c.id}"/>
+          ${escapeHtml(c.nombre_completo)}
+          <span class="text-muted">· ${escapeHtml(c.cedula || '')}</span>
+          ${c.fecha_baja ? `<span class="badge badge-neutral">baja ${fmtFecha(c.fecha_baja)}</span>` : ''}
+        </label>`).join('');
+    }
+
+    async function guardarAlta() {
+      const errorBox = document.getElementById('modal-alta-error');
+      const btn = document.getElementById('modal-alta-guardar');
+      errorBox.classList.add('hidden');
+
+      const ids = [...document.querySelectorAll('#modal-alta-lista .cand:checked')].map(i => Number(i.value));
+      if (!ids.length) {
+        errorBox.textContent = 'Elegí al menos un colaborador.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      try {
+        const r = await api('/api/grilla/planes', {
+          method: 'POST',
+          body: {
+            empresa: DATOS.empresa,
+            cliente_ids: ids,
+            plato_base_id: Number(document.getElementById('modal-alta-plato').value),
+            observacion: document.getElementById('modal-alta-observacion').value.trim() || null,
+            fecha_alta: document.getElementById('modal-alta-fecha').value,
+          },
+        });
+        avisarEnvios(r.envios);
+        cerrar('modal-alta');
+        await cargar();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── Día sin servicio ─────────────────────────────────────────
+
+    function abrirSinServicio(fecha) {
+      ssCtx = fecha;
+      document.getElementById('modal-ss-sub').textContent =
+        `${DATOS.empresa} · ${fmtFecha(fecha)}. Ese día no se produce nada para esta empresa.`;
+      document.getElementById('modal-ss-motivo').value = '';
+      document.getElementById('modal-ss-error').classList.add('hidden');
+      document.getElementById('modal-sin-servicio').classList.remove('hidden');
+    }
+
+    async function guardarSinServicio() {
+      const errorBox = document.getElementById('modal-ss-error');
+      const btn = document.getElementById('modal-ss-guardar');
+      errorBox.classList.add('hidden');
+      btn.disabled = true;
+      try {
+        const r = await api('/api/grilla/sin-servicio', {
+          method: 'PUT',
+          body: { empresa: DATOS.empresa, fecha: ssCtx, motivo: document.getElementById('modal-ss-motivo').value.trim() || null },
+        });
+        avisarEnvios(r.envios);
+        cerrar('modal-sin-servicio');
+        await cargar();
+      } catch (e) {
+        errorBox.textContent = e.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function quitarSinServicio(fecha) {
+      limpiarError();
+      try {
+        const qs = new URLSearchParams({ empresa: DATOS.empresa, fecha });
+        const r = await api('/api/grilla/sin-servicio?' + qs.toString(), { method: 'DELETE' });
+        avisarEnvios(r.envios);
+        await cargar();
+      } catch (e) {
+        mostrarError(e.message);
+      }
+    }
+  </script>
+</body>
+</html>

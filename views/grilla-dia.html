@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · hoja del día</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav no-print" id="nav"></div>
+
+    <div class="view" style="max-width:820px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title" id="titulo">hoja del día</div>
+          <div class="view-header-sub" id="sub-header">Cargando...</div>
+        </div>
+        <div class="btn-row no-print">
+          <button class="btn-secondary" id="btn-imprimir">Imprimir</button>
+          <a href="/grilla" class="btn-secondary" id="link-grilla">← Grilla</a>
+        </div>
+      </div>
+
+      <div id="error-global" class="form-error hidden"></div>
+
+      <!-- Selector: no se imprime, es para moverse entre días desde la pantalla -->
+      <div class="card no-print">
+        <div class="filter-row">
+          <select id="f-empresa" title="Empresa"></select>
+          <input type="date" id="f-fecha" title="Día"/>
+          <button class="btn-secondary" id="btn-prev" style="font-size:11px;">← Día anterior</button>
+          <button class="btn-secondary" id="btn-next" style="font-size:11px;">Día siguiente →</button>
+        </div>
+      </div>
+
+      <div id="contenido"></div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const DIAS_LARGOS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+    let EMPRESAS = [];
+    let empresaActual = '';
+    let fechaActual = '';
+
+    (async function () {
+      await ensureSession();
+      renderNav('/grilla');
+
+      try {
+        EMPRESAS = (await api('/api/grilla/empresas')).empresas;
+      } catch (e) {
+        mostrarError('No se pudo cargar la configuración de la grilla: ' + e.message);
+        return;
+      }
+      if (!EMPRESAS.length) {
+        mostrarError('Todavía no hay ninguna empresa con grilla de comedor configurada.');
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const empresaUrl = params.get('empresa');
+      empresaActual = EMPRESAS.some(e => e.empresa === empresaUrl) ? empresaUrl : EMPRESAS[0].empresa;
+      fechaActual = params.get('fecha') || proximoHabil(hoyLocalISO());
+
+      const selEmpresa = document.getElementById('f-empresa');
+      selEmpresa.innerHTML = EMPRESAS
+        .map(e => `<option value="${escapeHtml(e.empresa)}">${escapeHtml(e.empresa)}</option>`).join('');
+      selEmpresa.value = empresaActual;
+
+      selEmpresa.addEventListener('change', () => { empresaActual = selEmpresa.value; cargar(); });
+      document.getElementById('f-fecha').addEventListener('change', (ev) => {
+        if (ev.target.value) { fechaActual = ev.target.value; cargar(); }
+      });
+      document.getElementById('btn-prev').addEventListener('click', () => { fechaActual = habilAnterior(fechaActual); cargar(); });
+      document.getElementById('btn-next').addEventListener('click', () => { fechaActual = proximoHabil(sumarDias(fechaActual, 1)); cargar(); });
+      document.getElementById('btn-imprimir').addEventListener('click', () => window.print());
+
+      await cargar();
+    })();
+
+    // ── Fechas ───────────────────────────────────────────────────
+
+    function msUTC(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return Date.UTC(y, m - 1, d);
+    }
+    function isoUTC(ms) {
+      const dt = new Date(ms);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+    }
+    function sumarDias(iso, n) { return isoUTC(msUTC(iso) + n * 86400000); }
+    function diaSemana(iso) { return new Date(msUTC(iso)).getUTCDay(); }
+    function hoyLocalISO() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    // La grilla solo cubre lunes a viernes: moverse de día salta el fin de semana.
+    function proximoHabil(iso) {
+      let f = iso;
+      while (diaSemana(f) === 0 || diaSemana(f) === 6) f = sumarDias(f, 1);
+      return f;
+    }
+    function habilAnterior(iso) {
+      let f = sumarDias(iso, -1);
+      while (diaSemana(f) === 0 || diaSemana(f) === 6) f = sumarDias(f, -1);
+      return f;
+    }
+
+    function mostrarError(msg) {
+      const box = document.getElementById('error-global');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+
+    // ── Carga ────────────────────────────────────────────────────
+
+    async function cargar() {
+      document.getElementById('error-global').classList.add('hidden');
+      document.getElementById('f-fecha').value = fechaActual;
+      document.getElementById('f-empresa').value = empresaActual;
+
+      let dia;
+      try {
+        const params = new URLSearchParams({ empresa: empresaActual, fecha: fechaActual });
+        dia = (await api('/api/grilla/dia?' + params.toString())).dia;
+      } catch (e) {
+        document.getElementById('contenido').innerHTML = '';
+        mostrarError('No se pudo cargar la hoja del día: ' + e.message);
+        return;
+      }
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('empresa', empresaActual);
+      url.searchParams.set('fecha', fechaActual);
+      window.history.replaceState({}, '', url);
+
+      document.getElementById('link-grilla').href =
+        `/grilla?empresa=${encodeURIComponent(empresaActual)}&lunes=${encodeURIComponent(lunesDe(fechaActual))}`;
+
+      render(dia);
+    }
+
+    function lunesDe(iso) {
+      const d = diaSemana(iso);
+      return sumarDias(iso, d === 0 ? -6 : 1 - d);
+    }
+
+    function render(dia) {
+      document.getElementById('titulo').textContent = `${dia.empresa} · ${DIAS_LARGOS[diaSemana(dia.fecha)]} ${fmtFecha(dia.fecha)}`;
+      document.getElementById('sub-header').textContent = dia.sin_servicio
+        ? 'Día sin servicio'
+        : `${dia.total_viandas} ítem${dia.total_viandas === 1 ? '' : 's'} a producir`;
+
+      const cont = document.getElementById('contenido');
+
+      if (dia.sin_servicio) {
+        cont.innerHTML = `
+          <div class="card">
+            <div class="card-title">sin servicio</div>
+            <div class="empty-state">
+              Este día está marcado sin servicio${dia.motivo_sin_servicio ? ': ' + escapeHtml(dia.motivo_sin_servicio) : ''}.
+              No se produce nada para ${escapeHtml(dia.empresa)}.
+            </div>
+          </div>`;
+        return;
+      }
+
+      const totales = dia.totales.length
+        ? `<div class="table-wrap">
+             <table>
+               <thead><tr><th>Plato</th><th style="text-align:right;">Cantidad</th></tr></thead>
+               <tbody>
+                 ${dia.totales.map(t => `<tr><td>${escapeHtml(t.plato_nombre)}</td><td style="text-align:right;"><strong>${t.cantidad}</strong></td></tr>`).join('')}
+               </tbody>
+               <tfoot><tr class="grilla-fila-total"><td>Total</td><td style="text-align:right;">${dia.total_viandas}</td></tr></tfoot>
+             </table>
+           </div>`
+        : '<div class="empty-state">Este día no produce nada.</div>';
+
+      // Lista nominal: solo quien se aparta de lo normal. Quien come el plato
+      // estándar ya está contado en los totales y no hace falta nombrarlo.
+      const grupos = dia.grupos.length
+        ? dia.grupos.map(g => `
+            <div class="hoja-grupo" style="margin-bottom:14px;">
+              <div class="form-label">${escapeHtml(g.plato_nombre)} · ${g.personas.length}</div>
+              <div class="table-wrap">
+                <table>
+                  <tbody>
+                    ${g.personas.map(p => `
+                      <tr>
+                        <td style="white-space:normal;">${escapeHtml(p.nombre_completo)}</td>
+                        <td style="white-space:normal;" class="text-muted">
+                          ${p.base ? 'plato base' : 'cambio del día'}
+                          ${p.observacion ? ' · ' + escapeHtml(p.observacion) : ''}
+                          ${p.comentario ? ' · ' + escapeHtml(p.comentario) : ''}
+                        </td>
+                      </tr>`).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>`).join('')
+        : '<div class="empty-state">Nadie come algo distinto al estándar.</div>';
+
+      const ausencias = dia.ausencias.length
+        ? `<div class="table-wrap">
+             <table>
+               <tbody>
+                 ${dia.ausencias.map(a => `
+                   <tr>
+                     <td style="white-space:normal;">${escapeHtml(a.nombre_completo)}</td>
+                     <td>${escapeHtml(AUSENCIA_LABEL[a.ausencia] || a.ausencia)}</td>
+                     <td style="white-space:normal;" class="text-muted">${a.comentario ? escapeHtml(a.comentario) : ''}</td>
+                   </tr>`).join('')}
+               </tbody>
+             </table>
+           </div>`
+        : '<div class="empty-state">Sin ausencias cargadas.</div>';
+
+      const observaciones = dia.observaciones.length
+        ? `<div class="table-wrap">
+             <table>
+               <tbody>
+                 ${dia.observaciones.map(o => `
+                   <tr>
+                     <td style="white-space:normal;">${escapeHtml(o.nombre_completo)}</td>
+                     <td style="white-space:normal;">${escapeHtml(o.observacion)}</td>
+                   </tr>`).join('')}
+               </tbody>
+             </table>
+           </div>`
+        : '';
+
+      cont.innerHTML = `
+        <div class="card">
+          <div class="card-title">total a producir</div>
+          ${totales}
+        </div>
+
+        <div class="card">
+          <div class="card-title">quién come algo distinto</div>
+          ${grupos}
+        </div>
+
+        <div class="card">
+          <div class="card-title">ausencias · ${dia.ausencias.length}</div>
+          ${ausencias}
+        </div>
+
+        ${observaciones ? `
+        <div class="card">
+          <div class="card-title">observaciones fijas (comen el estándar)</div>
+          ${observaciones}
+        </div>` : ''}`;
+    }
+  </script>
+</body>
+</html>

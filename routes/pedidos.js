@@ -26,6 +26,18 @@ function requireEscritura(req, res, next) {
   next();
 }
 
+// ── Pedidos de la grilla de comedor (fase 7) ──────────────────────
+// Un pedido con origen = 'grilla' es el pedido semanal que arma sola la grilla
+// de comedor: sus líneas son el total calculado por (plato, fecha) y se
+// reescriben enteras en cada envío. Editarlo desde acá no serviría de nada —
+// el siguiente envío lo pisaría — así que se rechaza de entrada, en vez de
+// dejar que alguien haga un cambio que va a desaparecer sin aviso.
+const MSG_PEDIDO_GRILLA = 'Este pedido se gestiona desde la grilla semanal';
+
+function esDeGrilla(pedido) {
+  return pedido && pedido.origen === 'grilla';
+}
+
 // Solo admin puede editar/cancelar pedidos
 function requireAdmin(req, res, next) {
   if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
@@ -262,6 +274,10 @@ router.patch('/:id/pago', requireEscritura, async (req, res, next) => {
     const id = Number(req.params.id);
     const pedido = id ? await pedidos.getById(id) : null;
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
+    // La facturación del comedor no es parte de la fase 7: el pedido semanal
+    // nace con monto 0 y estado 'pendiente', y marcarlo pagado sería registrar
+    // un cobro de Gs. 0 que no existe.
+    if (esDeGrilla(pedido)) return res.status(400).json({ error: MSG_PEDIDO_GRILLA });
 
     const body = req.body || {};
     const estado_pago = body.estado_pago ? String(body.estado_pago).trim() : '';
@@ -296,6 +312,7 @@ router.patch('/:id', requireAdmin, async (req, res, next) => {
     const pedido = id ? await pedidos.getById(id) : null;
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
+    if (esDeGrilla(pedido)) return res.status(400).json({ error: MSG_PEDIDO_GRILLA });
     if (pedido.cancelado) return res.status(400).json({ error: 'No se puede editar un pedido cancelado' });
 
     const body = req.body || {};
@@ -358,6 +375,7 @@ router.patch('/:id/cancelar', requireAdmin, async (req, res, next) => {
     const pedido = id ? await pedidos.getById(id) : null;
     if (!pedido) return res.status(404).json({ error: 'Pedido no encontrado' });
 
+    if (esDeGrilla(pedido)) return res.status(400).json({ error: MSG_PEDIDO_GRILLA });
     if (pedido.cancelado) return res.status(400).json({ error: 'Este pedido ya está cancelado' });
 
     const motivo = String((req.body || {}).motivo || '').trim();
@@ -392,6 +410,12 @@ async function contextoEdicion(req, res, { exigirMotivo = true } = {}) {
   const pedido = id ? await pedidos.getById(id) : null;
   if (!pedido) {
     res.status(404).json({ error: 'Pedido no encontrado' });
+    return null;
+  }
+  // Cubre de una sola vez las rutas de líneas y de excepciones: todas pasan
+  // por acá antes de tocar nada.
+  if (esDeGrilla(pedido)) {
+    res.status(400).json({ error: MSG_PEDIDO_GRILLA });
     return null;
   }
   if (pedido.cancelado) {

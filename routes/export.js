@@ -58,7 +58,11 @@ async function exportarPedidos(req, res) {
   const SEGMENTOS = ['particular', 'empresa', 'embajador'];
   const CANALES = ['whatsapp', 'redes', 'embajador', 'boca_a_boca', 'b2b', 'otro'];
 
-  const where = ['p.cancelado = false'];
+  // origen IS DISTINCT FROM 'grilla': el pedido semanal del comedor (fase 7)
+  // no se exporta. Tiene monto 0 (su facturación no pasa por el CRM) y la
+  // única columna numérica de esta hoja es el monto, así que una fila suya
+  // solo sirve para que alguien la sume o la promedie mal en Excel.
+  const where = ['p.cancelado = false', "p.origen IS DISTINCT FROM 'grilla'"];
   const params = [];
   let idx = 1;
 
@@ -175,8 +179,8 @@ router.get('/', async (req, res, next) => {
         CASE WHEN MAX(p.fecha_pedido) IS NOT NULL
           THEN EXTRACT(DAY FROM NOW() - MAX(p.fecha_pedido)::timestamp)::integer
           ELSE NULL END                                              AS dias_sin_pedir,
-        COALESCE(AVG(p.monto)::float,  0)                           AS ticket_promedio,
-        COALESCE(SUM(p.monto)::float,  0)                           AS ticket_total
+        COALESCE(AVG(p.monto) FILTER (WHERE p.origen IS DISTINCT FROM 'grilla')::float, 0) AS ticket_promedio,
+        COALESCE(SUM(p.monto) FILTER (WHERE p.origen IS DISTINCT FROM 'grilla')::float, 0) AS ticket_total
       FROM clientes c
       LEFT JOIN pedidos p ON p.cliente_id = c.id
       ${clienteWhere}
@@ -241,7 +245,9 @@ router.get('/', async (req, res, next) => {
     // ── Hoja "Pedidos" (solo tipo=historial) ───────────────────
     if (tipo === 'historial') {
       // Los filtros de pedidos = mismos filtros de cliente + rango de fechas opcional
-      const pedidosConds   = ['p.cancelado = false', ...clienteConds];
+      // Mismo criterio que exportarPedidos: el pedido semanal del comedor no
+      // va a la hoja de pedidos (ver el comentario de allá).
+      const pedidosConds   = ['p.cancelado = false', "p.origen IS DISTINCT FROM 'grilla'", ...clienteConds];
       const pedidosParams  = [...clienteParams];
       let   pn             = n;
 

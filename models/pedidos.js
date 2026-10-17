@@ -131,7 +131,8 @@ async function listFiltered({
   const sql = `
     SELECT
       p.id, p.fecha_pedido, p.monto, p.monto_pagado, p.descripcion, p.estado_pago, p.tipo_vianda, p.cancelado,
-      c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen
+      p.origen, p.semana_lunes,
+      c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen, c.empresa
     FROM pedidos p
     JOIN clientes c ON c.id = p.cliente_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}

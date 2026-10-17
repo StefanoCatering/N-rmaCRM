@@ -233,7 +233,7 @@
     function opcionesPlatos() {
       return CATALOGO_PLATOS.map(c => `
         <optgroup label="${escapeHtml(c.categoria)}">
-          ${c.platos.map(p => `<option value="${p.id}">${escapeHtml(p.nombre)}</option>`).join('')}
+          ${c.platos.map(p => `<option value="${p.id}">${escapeHtml(p.etiqueta)}</option>`).join('')}
         </optgroup>`).join('');
     }
 
