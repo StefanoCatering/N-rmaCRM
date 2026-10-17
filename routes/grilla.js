@@ -267,7 +267,7 @@ router.get('/semana', requireVerGrilla, async (req, res, next) => {
       dias_sin_servicio: Object.fromEntries(datos.sinServicio),
       colaboradores,
       general: [...generalPorPlato.values()],
-      catalogo_general: await platos.listGenerales(),
+      catalogo_general: await platos.listTodosActivosPorCategoria(),
       totales: [...totalesPorPlato.values()].sort((a, b) => a.plato_nombre.localeCompare(b.plato_nombre, 'es')),
       totales_por_dia: totalesPorDia,
       // Una semana cuyo viernes ya pasó es de solo lectura entera: la vista
@@ -467,8 +467,11 @@ router.put('/general', requireEditarGrilla, async (req, res, next) => {
     const errFecha = errorFechaEditable(fecha);
     if (errFecha) return res.status(400).json({ error: errFecha });
 
+    // Cualquier plato activo del catálogo, de cualquier categoría: el pedido
+    // general no se limita a 'General' (sopa, jugo), también lleva wraps,
+    // sándwiches y ensaladas pedidos por cantidad y no por colaborador.
     const plato_id = Number(body.plato_id);
-    if (!Number.isInteger(plato_id) || !(await platos.idsGeneralesActivos([plato_id])).has(plato_id)) {
+    if (!Number.isInteger(plato_id) || !(await platos.idsActivosTodos([plato_id])).has(plato_id)) {
       return res.status(400).json({ error: 'El ítem del pedido general es inválido o está inactivo' });
     }
 

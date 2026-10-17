@@ -350,6 +350,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--orange); backgro
 .grilla-sub    { font-size: 9px; color: var(--text3); font-weight: 400; }
 .grilla-obs    { font-size: 9px; color: var(--orange); font-weight: 600; }
 
+/* Encabezado de categoría en el pedido general: ahí entra todo el catálogo
+   activo, así que la lista se recorre por grupo. */
+.grilla-grupo td {
+  font-size: 9px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text3); background: var(--beige);
+}
+.grilla-grupo:hover td { background: var(--beige); }
+
 /* Encabezado de día */
 .grilla-dia-head { text-align: center; }
 .grilla-dia-nombre { font-size: 10px; font-weight: 600; color: var(--navy); text-transform: uppercase; }

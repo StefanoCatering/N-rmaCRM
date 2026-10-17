@@ -4,11 +4,16 @@ const pool = require('./db');
 // SQL Editor de Supabase: cualquier fila nueva aparece sola en el form de
 // pedido, sin deploy. Por eso acá no hay lista hardcodeada de categorías.
 //
-// Única excepción: la categoría 'General' (fase 7). Son los ítems que van en
-// el PEDIDO GENERAL de la grilla de comedor (sopa, ensalada mixta, jugo,
-// vinagreta): no se piden por persona, así que no tienen sentido como línea de
-// un pedido de particular ni como plato base / celda de la grilla. Viven en la
-// misma tabla porque van al mismo pedido semanal y los nombra el mismo sync.
+// Única excepción: la categoría 'General' (fase 7). Son ítems que NO se piden
+// por persona (sopa, ensalada mixta, jugo, vinagreta): no tienen sentido como
+// línea de un pedido de particular ni como plato base / celda de la grilla.
+// Viven en la misma tabla porque van al mismo pedido semanal y los nombra el
+// mismo sync.
+//
+// Ojo con la dirección de la exclusión: 'General' queda afuera del catálogo
+// "por persona", pero el PEDIDO GENERAL de la grilla no está limitado a esa
+// categoría. Ahí entra cualquier plato activo, porque las encargadas piden
+// sándwiches, wraps y ensaladas además de sopa y jugo.
 const CATEGORIA_GENERAL = 'General';
 
 // ── Etiqueta de un plato ─────────────────────────────────────────
@@ -29,6 +34,20 @@ function etiquetaPlato(categoria, nombre) {
   return CATEGORIAS_SIN_PREFIJO.has(categoria) ? nombre : `${categoria} · ${nombre}`;
 }
 
+// Se manda la etiqueta ya armada: la regla vive solo acá, y las vistas la
+// muestran tal cual. Así lo que ATC elige en el selector se lee igual que lo
+// que después aparece en la celda, en los totales y en la comanda de cocina.
+function agruparPorCategoria(filas) {
+  const porCategoria = new Map();
+  for (const p of filas) {
+    if (!porCategoria.has(p.categoria)) porCategoria.set(p.categoria, []);
+    porCategoria.get(p.categoria).push({
+      id: p.id, nombre: p.nombre, etiqueta: etiquetaPlato(p.categoria, p.nombre),
+    });
+  }
+  return [...porCategoria.entries()].map(([categoria, platos]) => ({ categoria, platos }));
+}
+
 // Platos activos, agrupados por categoría para armar los <optgroup> del select.
 // Excluye 'General' (ver arriba): este es el catálogo "por persona".
 async function listActivosPorCategoria() {
@@ -38,29 +57,22 @@ async function listActivosPorCategoria() {
     WHERE activo = 1 AND categoria <> $1
     ORDER BY categoria ASC, nombre ASC
   `, [CATEGORIA_GENERAL]);
-
-  // Se manda la etiqueta ya armada: la regla vive solo acá, y las vistas la
-  // muestran tal cual. Así lo que ATC elige en el selector se lee igual que lo
-  // que después aparece en la celda, en los totales y en la comanda de cocina.
-  const porCategoria = new Map();
-  for (const p of r.rows) {
-    if (!porCategoria.has(p.categoria)) porCategoria.set(p.categoria, []);
-    porCategoria.get(p.categoria).push({
-      id: p.id, nombre: p.nombre, etiqueta: etiquetaPlato(p.categoria, p.nombre),
-    });
-  }
-  return [...porCategoria.entries()].map(([categoria, platos]) => ({ categoria, platos }));
+  return agruparPorCategoria(r.rows);
 }
 
-// Ítems activos del pedido general (categoría 'General'), lista plana: es un
-// select simple, no necesita agruparse.
-async function listGenerales() {
+// Catálogo del PEDIDO GENERAL de la grilla: todos los platos activos, de
+// cualquier categoría, agrupados igual que el de arriba. A diferencia de
+// listActivosPorCategoria(), este NO excluye 'General': el pedido general
+// mezcla los ítems que no van por persona (sopa, jugo) con platos comunes
+// (wraps, ensaladas) que la encargada pide por cantidad y no por colaborador.
+async function listTodosActivosPorCategoria() {
   const r = await pool.query(`
-    SELECT id, nombre FROM platos
-    WHERE activo = 1 AND categoria = $1
-    ORDER BY nombre ASC
-  `, [CATEGORIA_GENERAL]);
-  return r.rows.map(p => ({ ...p, etiqueta: etiquetaPlato(CATEGORIA_GENERAL, p.nombre) }));
+    SELECT id, categoria, nombre
+    FROM platos
+    WHERE activo = 1
+    ORDER BY categoria ASC, nombre ASC
+  `);
+  return agruparPorCategoria(r.rows);
 }
 
 // Subconjunto de ids que existen y están activos. Se usa para validar las
@@ -75,12 +87,13 @@ async function idsActivos(ids) {
   return new Set(r.rows.map(row => row.id));
 }
 
-// Ídem, pero solo entre los ítems del pedido general.
-async function idsGeneralesActivos(ids) {
+// Ídem, pero sin excluir ninguna categoría: es la validación del PEDIDO
+// GENERAL de la grilla, donde entra cualquier plato activo del catálogo.
+async function idsActivosTodos(ids) {
   if (!ids.length) return new Set();
   const r = await pool.query(
-    'SELECT id FROM platos WHERE activo = 1 AND categoria = $1 AND id = ANY($2::int[])',
-    [CATEGORIA_GENERAL, ids]
+    'SELECT id FROM platos WHERE activo = 1 AND id = ANY($1::int[])',
+    [ids]
   );
   return new Set(r.rows.map(row => row.id));
 }
@@ -127,7 +140,7 @@ async function idPorNombre(nombre) {
 
 module.exports = {
   CATEGORIA_GENERAL, etiquetaPlato,
-  listActivosPorCategoria, listGenerales,
-  idsActivos, idsGeneralesActivos,
+  listActivosPorCategoria, listTodosActivosPorCategoria,
+  idsActivos, idsActivosTodos,
   nombresPorId, fichasPorId, idPorNombre,
 };
