@@ -110,9 +110,14 @@ async function getEmpresa(empresa) {
     SELECT
       g.empresa, g.cliente_pedido_id, g.ubicacion_id, g.activa,
       c.nombre_completo AS cliente_nombre,
-      c.tipo_envase     AS cliente_tipo_envase
+      c.tipo_envase     AS cliente_tipo_envase,
+      -- Sin ubicación configurada es válido (el pedido va sin dirección); con
+      -- ubicación, tiene que ser del cliente cuenta-empresa. Lo chequea
+      -- enviarSemana antes de tocar el pedido.
+      (g.ubicacion_id IS NULL OR u.cliente_id = g.cliente_pedido_id) AS ubicacion_valida
     FROM grilla_empresas g
     JOIN clientes c ON c.id = g.cliente_pedido_id
+    LEFT JOIN ubicaciones u ON u.id = g.ubicacion_id
     WHERE g.empresa = $1
   `, [empresa]);
   return r.rows[0] || null;
@@ -136,7 +141,7 @@ async function cargarSemana(empresa, lunes) {
       SELECT
         p.cliente_id, p.plato_base_id, p.observacion, p.fecha_alta, p.fecha_baja,
         c.nombre_completo, c.cedula, c.estado,
-        pl.nombre AS plato_base_nombre
+        pl.nombre AS plato_base_nombre, pl.categoria AS plato_base_categoria
       FROM grilla_planes p
       JOIN clientes c ON c.id = p.cliente_id
       JOIN platos pl  ON pl.id = p.plato_base_id
@@ -315,6 +320,13 @@ const descripcionPedido = (empresa, lunes) =>
 // espejo en Narma Pedidos, que está indexado por (crm_pedido_detalle_id,
 // fecha_entrega), no acumula filas canceladas fantasma.
 async function conciliarLineas(client, pedidoId, totales) {
+  // Los días ya pasados son intocables: cocina YA los produjo. Un cambio de
+  // plato base, un alta con fecha vieja o una baja retroactiva recalculan toda
+  // la semana, y sin esta guarda reescribirían líneas (y filas en Narma
+  // Pedidos) de días que ya se entregaron. Las líneas de fechas anteriores a
+  // hoy no se crean, no se actualizan y no se cancelan: quedan como están.
+  const hoy = hoyISO();
+
   const existentesR = await client.query(
     `SELECT id, plato_id, cantidad, fecha_entrega, cancelado
      FROM pedido_detalle WHERE pedido_id = $1 ORDER BY id ASC`,
@@ -324,15 +336,20 @@ async function conciliarLineas(client, pedidoId, totales) {
   const porClave = new Map();
   const duplicadas = [];
   for (const l of existentesR.rows) {
-    const k = clavePlatoFecha(l.plato_id, detalle.aISO(l.fecha_entrega));
+    const fecha = detalle.aISO(l.fecha_entrega);
+    if (fecha < hoy) continue; // día pasado: fuera de la conciliación
+    const k = clavePlatoFecha(l.plato_id, fecha);
     if (porClave.has(k)) duplicadas.push(l); // no debería pasar; se cancelan
     else porClave.set(k, l);
   }
 
-  const resumen = { creadas: 0, actualizadas: 0, canceladas: 0, entregas: totales.size };
+  const resumen = { creadas: 0, actualizadas: 0, canceladas: 0, entregas: 0, omitidas_por_pasadas: 0 };
   const nuevas = [];
 
   for (const [k, total] of totales) {
+    if (total.fecha < hoy) { resumen.omitidas_por_pasadas++; continue; }
+    resumen.entregas++;
+
     const linea = porClave.get(k);
     if (!linea) {
       nuevas.push({
@@ -354,6 +371,8 @@ async function conciliarLineas(client, pedidoId, totales) {
     }
   }
 
+  // Solo pueden caer acá líneas de hoy en adelante: porClave y duplicadas ya
+  // dejaron afuera las de días pasados.
   const sobrantes = [
     ...[...porClave.entries()].filter(([k, l]) => !totales.has(k) && !l.cancelado).map(([, l]) => l),
     ...duplicadas.filter(l => !l.cancelado),
@@ -375,14 +394,46 @@ async function conciliarLineas(client, pedidoId, totales) {
   return resumen;
 }
 
+// ¿La semana ya terminó? (su viernes es anterior a hoy). Una semana terminada
+// no se envía ni se reenvía: no queda ningún día que cocina pueda producir.
+function semanaTerminada(lunes) {
+  return detalle.sumarDias(lunes, 4) < hoyISO();
+}
+
 // Envía (o reenvía) una semana a cocina.
+//
+// Serializado por (empresa, semana) con un advisory lock: el cálculo de
+// totales se hace ANTES de la transacción, así que dos escrituras seguidas
+// podían disparar dos envíos donde el que leyó datos viejos commiteaba último
+// y quedaba como versión final, tanto en el CRM como en Narma Pedidos. El lock
+// se toma en una conexión propia y cubre TODO: lectura, cálculo, conciliación
+// y sync. Es por semana y empresa, así que no serializa envíos de semanas
+// distintas ni de otras empresas.
 //
 // Todo el lado CRM va en UNA transacción; recién después se llama UNA vez al
 // sync, que es del pedido completo. Si el sync falla, lo guardado en el CRM
 // queda igual y la respuesta lo informa (mismo criterio que la fase 6).
 async function enviarSemana(empresa, lunes, usuario) {
+  const candado = await pool.connect();
+  try {
+    await candado.query('SELECT pg_advisory_lock(hashtext($1))', [claveSemana(empresa, lunes)]);
+    return await enviarSemanaBloqueada(empresa, lunes, usuario);
+  } finally {
+    await candado.query('SELECT pg_advisory_unlock(hashtext($1))', [claveSemana(empresa, lunes)])
+      .catch(err => console.error('[grilla] No se pudo liberar el lock de envío:', err.message));
+    candado.release();
+  }
+}
+
+async function enviarSemanaBloqueada(empresa, lunes, usuario) {
   const emp = await getEmpresa(empresa);
   if (!emp) return { ok: false, motivo: 'empresa_sin_grilla' };
+
+  // La ubicación configurada tiene que ser una del cliente cuenta-empresa: es
+  // la dirección que se denormaliza en pedidos_crm_detalle y por la que sale
+  // el reparto. No se puede exigir con un CHECK (necesitaría leer otra tabla),
+  // así que se valida acá, que es el único punto por donde pasa al pedido.
+  if (!emp.ubicacion_valida) return { ok: false, motivo: 'ubicacion_ajena' };
 
   const datos = await cargarSemana(empresa, lunes);
   const totales = totalesDesdeDatos(datos);
@@ -457,6 +508,9 @@ async function reenviarSiCorresponde(empresa, lunesAfectados, usuario) {
 
   for (const lunes of new Set(lunesAfectados)) {
     if (!yaEnviadas.has(lunes)) continue;
+    // Una semana ya terminada no tiene nada que reenviar: conciliarLineas no
+    // tocaría ninguna línea y el sync solo generaría ruido en producción.
+    if (semanaTerminada(lunes)) continue;
     try {
       const r = await enviarSemana(empresa, lunes, usuario);
       envios.push({ lunes, ...r });
@@ -481,7 +535,7 @@ async function hojaDia(empresa, fecha) {
   for (const celda of datos.celdas.values()) if (celda.plato_id) idsPlato.add(celda.plato_id);
   for (const g of datos.general) idsPlato.add(g.plato_id);
   const fichas = await platos.fichasPorId([...idsPlato]);
-  const nombrePlato = id => (fichas.get(id) || {}).nombre || `Plato #${id}`;
+  const nombrePlato = id => (fichas.get(id) || {}).etiqueta || `Plato #${id}`;
 
   // Totales del día: los mismos que se mandan a cocina, filtrados por fecha.
   const totales = [...totalesDesdeDatos(datos).values()]
@@ -579,7 +633,8 @@ async function revisarAlta(empresa, ids) {
 
 async function getPlan(clienteId) {
   const r = await pool.query(`
-    SELECT p.*, c.empresa, c.nombre_completo, pl.nombre AS plato_base_nombre
+    SELECT p.*, c.empresa, c.nombre_completo,
+           pl.nombre AS plato_base_nombre, pl.categoria AS plato_base_categoria
     FROM grilla_planes p
     JOIN clientes c ON c.id = p.cliente_id
     JOIN platos pl  ON pl.id = p.plato_base_id
@@ -811,7 +866,7 @@ module.exports = {
   // constantes
   AUSENCIAS, PLATO_ESTANDAR, ZONA_HORARIA,
   // fechas
-  hoyISO, esHabil, esLunes, lunesDe, diasDeSemana,
+  hoyISO, esHabil, esLunes, lunesDe, diasDeSemana, semanaTerminada,
   clavePlatoFecha, claveCelda, claveSemana,
   // lectura
   listEmpresas, getEmpresa, cargarSemana, planActivoEn, platoEfectivo,

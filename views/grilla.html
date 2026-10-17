@@ -359,7 +359,7 @@
     function opcionesPlatos(seleccionado) {
       return CATALOGO.map(c => `
         <optgroup label="${escapeHtml(c.categoria)}">
-          ${c.platos.map(p => `<option value="${p.id}"${Number(seleccionado) === p.id ? ' selected' : ''}>${escapeHtml(p.nombre)}</option>`).join('')}
+          ${c.platos.map(p => `<option value="${p.id}"${Number(seleccionado) === p.id ? ' selected' : ''}>${escapeHtml(p.etiqueta)}</option>`).join('')}
         </optgroup>`).join('');
     }
 
@@ -550,7 +550,7 @@
               placeholder="0"${puedeTocar ? '' : ' disabled'}/>
           </td>`;
         }).join('');
-        return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(item.nombre)}</div></td>${celdas}<td class="grilla-col-acc"></td></tr>`;
+        return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(item.etiqueta)}</div></td>${celdas}<td class="grilla-col-acc"></td></tr>`;
       }).join('');
 
       cont.innerHTML = `
@@ -627,11 +627,13 @@
       const btnEnviar = document.getElementById('btn-enviar');
       const btnReintentar = document.getElementById('btn-reintentar');
 
-      btnEnviar.disabled = !puedeEditar();
+      btnEnviar.disabled = !puedeEditar() || DATOS.semana_terminada;
       btnEnviar.textContent = envio.enviada ? 'Reenviar semana a cocina' : 'Enviar semana a cocina';
 
       if (!envio.enviada) {
-        cont.innerHTML = '<div class="empty-state">Esta semana todavía no se envió a cocina.</div>';
+        cont.innerHTML = DATOS.semana_terminada
+          ? '<div class="empty-state">Esta semana ya terminó y nunca se envió a cocina.</div>'
+          : '<div class="empty-state">Esta semana todavía no se envió a cocina.</div>';
         btnReintentar.classList.add('hidden');
         return;
       }

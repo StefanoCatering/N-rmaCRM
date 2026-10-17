@@ -1,4 +1,5 @@
 const pool = require('./db');
+const platos = require('./platos');
 
 // Líneas de pedido (pedido_detalle) y sus excepciones por fecha
 // (pedido_detalle_excepciones), más la resolución de fechas concretas que
@@ -124,25 +125,37 @@ const SELECT_LINEA = `
   JOIN platos pl ON pl.id = d.plato_id
 `;
 
+// plato_etiqueta: el nombre con el que se muestra el plato en TODO el sistema
+// (ver platos.etiquetaPlato). Se agrega acá, del lado del servidor, para que
+// las vistas no tengan que repetir la regla y no puedan quedar desalineadas
+// con lo que se le manda a cocina.
+const conEtiqueta = (fila) => (fila
+  ? { ...fila, plato_etiqueta: platos.etiquetaPlato(fila.plato_categoria, fila.plato_nombre) }
+  : fila);
+
 async function listByPedido(pedidoId) {
   const r = await pool.query(`${SELECT_LINEA} WHERE d.pedido_id = $1 ORDER BY d.id ASC`, [pedidoId]);
-  return r.rows;
+  return r.rows.map(conEtiqueta);
 }
 
 async function getById(id) {
   const r = await pool.query(`${SELECT_LINEA} WHERE d.id = $1`, [id]);
-  return r.rows[0] || null;
+  return conEtiqueta(r.rows[0] || null);
 }
 
 async function listExcepciones(pedidoDetalleId) {
   const r = await pool.query(`
-    SELECT e.*, pl.nombre AS plato_nombre
+    SELECT e.*, pl.nombre AS plato_nombre, pl.categoria AS plato_categoria
     FROM pedido_detalle_excepciones e
     LEFT JOIN platos pl ON pl.id = e.plato_id
     WHERE e.pedido_detalle_id = $1
     ORDER BY e.fecha ASC
   `, [pedidoDetalleId]);
-  return r.rows;
+  // El plato de una excepción es opcional (NULL = sin cambio), de ahí el
+  // LEFT JOIN y el chequeo antes de etiquetar.
+  return r.rows.map(e => (e.plato_id
+    ? { ...e, plato_etiqueta: platos.etiquetaPlato(e.plato_categoria, e.plato_nombre) }
+    : e));
 }
 
 // Todas las excepciones de todas las líneas de un pedido, en una sola consulta.

@@ -245,7 +245,7 @@
     function opcionesPlatos(seleccionado) {
       return CATALOGO_PLATOS.map(c => `
         <optgroup label="${escapeHtml(c.categoria)}">
-          ${c.platos.map(p => `<option value="${p.id}"${Number(seleccionado) === p.id ? ' selected' : ''}>${escapeHtml(p.nombre)}</option>`).join('')}
+          ${c.platos.map(p => `<option value="${p.id}"${Number(seleccionado) === p.id ? ' selected' : ''}>${escapeHtml(p.etiqueta)}</option>`).join('')}
         </optgroup>`).join('');
     }
 
@@ -268,8 +268,7 @@
         return `
         <div class="card" style="padding:12px;margin-bottom:10px;" data-linea="${l.id}">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
-            <strong>${escapeHtml(l.plato_nombre)}</strong>
-            <span class="text-muted">· ${escapeHtml(l.plato_categoria)}</span>
+            <strong>${escapeHtml(l.plato_etiqueta)}</strong>
             <span class="badge badge-neutral">x${l.cantidad}</span>
             <span class="badge ${l.modo === 'recurrente' ? 'badge-info' : 'badge-neutral'}">${l.modo}</span>
             ${l.cancelado ? '<span class="badge badge-danger">Cancelada</span>' : ''}
@@ -337,7 +336,7 @@
       const lista = exc.length ? exc.map(e => {
         const partes = [];
         if (e.omitir) partes.push('<span class="badge badge-danger">no se produce</span>');
-        if (e.plato_id) partes.push(`plato: ${escapeHtml(e.plato_nombre || String(e.plato_id))}`);
+        if (e.plato_id) partes.push(`plato: ${escapeHtml(e.plato_etiqueta || e.plato_nombre || String(e.plato_id))}`);
         if (e.cantidad !== null && e.cantidad !== undefined) partes.push(`cantidad: ${e.cantidad}`);
         if (e.comentario) partes.push(`“${escapeHtml(e.comentario)}”`);
         return `

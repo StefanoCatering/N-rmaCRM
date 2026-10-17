@@ -47,9 +47,12 @@ UPDATE usuarios SET gestiona_grilla = true WHERE username = 'Admin1' AND gestion
 --   De él salen el nombre y el envase que ve cocina (clientes.tipo_envase).
 --   Sin ON DELETE: borrar la cuenta empresa dejaría la grilla sin destino, y
 --   es mejor que la base lo impida a que el pedido semanal quede huérfano.
--- ubicacion_id: dónde se entrega. Debería ser una de las ubicaciones de
---   cliente_pedido_id (no se puede exigir en un CHECK sin leer otra tabla; lo
---   valida la aplicación al enviar). ON DELETE SET NULL para que editar las
+-- ubicacion_id: dónde se entrega. Tiene que ser una de las ubicaciones de
+--   cliente_pedido_id. No se puede exigir en un CHECK (necesitaría leer otra
+--   tabla), así que lo valida models/grilla.js en enviarSemana, que es el
+--   único punto por donde esta ubicación llega al pedido: si no corresponde,
+--   el envío se rechaza con un error claro en lugar de mandarle a producción
+--   la dirección de otro cliente. ON DELETE SET NULL para que editar las
 --   ubicaciones del cliente no bloquee nada.
 
 CREATE TABLE IF NOT EXISTS grilla_empresas (

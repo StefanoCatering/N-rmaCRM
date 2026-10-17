@@ -184,7 +184,7 @@ router.get('/semana', requireVerGrilla, async (req, res, next) => {
     for (const g of datos.general) idsPlato.add(g.plato_id);
     for (const t of totales.values()) idsPlato.add(t.plato_id);
     const fichas = await platos.fichasPorId([...idsPlato]);
-    const nombrePlato = id => (fichas.get(id) || {}).nombre || `Plato #${id}`;
+    const nombrePlato = id => (fichas.get(id) || {}).etiqueta || `Plato #${id}`;
 
     // Un colaborador por fila, con lo que come cada día ya resuelto en el
     // servidor: el front dibuja, no calcula.
@@ -216,7 +216,7 @@ router.get('/semana', requireVerGrilla, async (req, res, next) => {
         cedula: c.cedula,
         estado: c.estado,
         plato_base_id: c.plato_base_id,
-        plato_base_nombre: c.plato_base_nombre,
+        plato_base_nombre: nombrePlato(c.plato_base_id),
         observacion: c.observacion,
         fecha_alta: c.fecha_alta,
         fecha_baja: c.fecha_baja,
@@ -270,6 +270,9 @@ router.get('/semana', requireVerGrilla, async (req, res, next) => {
       catalogo_general: await platos.listGenerales(),
       totales: [...totalesPorPlato.values()].sort((a, b) => a.plato_nombre.localeCompare(b.plato_nombre, 'es')),
       totales_por_dia: totalesPorDia,
+      // Una semana cuyo viernes ya pasó es de solo lectura entera: la vista
+      // apaga el botón de enviar en vez de dejar que ATC coma el 400.
+      semana_terminada: grilla.semanaTerminada(lunes),
       envio: {
         enviada: !!pedido,
         pedido_id: pedido ? pedido.id : null,
@@ -484,8 +487,9 @@ router.put('/general', requireEditarGrilla, async (req, res, next) => {
 
 // POST /api/grilla/planes — alta de uno o varios colaboradores al comedor.
 // fecha_alta puede ser pasada (alguien que empezó la semana anterior y se
-// carga ahora): solo se reenvían las semanas de hoy en adelante, así que una
-// fecha vieja no reescribe lo ya entregado.
+// carga ahora). Lo que impide que eso reescriba lo ya entregado NO es el filtro
+// de semanas —la semana en curso incluye días que ya pasaron—, sino que
+// conciliarLineas deja intactas las líneas con fecha anterior a hoy.
 router.post('/planes', requireEditarGrilla, async (req, res, next) => {
   try {
     const body = req.body || {};
@@ -567,6 +571,10 @@ router.patch('/planes/:cliente_id', requireEditarGrilla, async (req, res, next) 
         const fecha_baja = String(body.fecha_baja).trim();
         if (!fechaReal(fecha_baja)) errores.push('Fecha de baja inválida (formato YYYY-MM-DD)');
         else if (fecha_baja < plan.fecha_alta) errores.push('La fecha de baja no puede ser anterior al alta');
+        // Una baja retroactiva diría que la persona no comió días que cocina
+        // ya produjo y que probablemente ya retiró. Para corregir el pasado
+        // hay que ir a la base, no a la grilla.
+        else if (fecha_baja < grilla.hoyISO()) errores.push('La fecha de baja no puede ser anterior a hoy');
         else cambios.fecha_baja = fecha_baja;
       }
     }
@@ -594,8 +602,20 @@ router.post('/enviar', requireEditarGrilla, async (req, res, next) => {
     const { lunes, error } = resolverLunes(body.lunes);
     if (error) return res.status(400).json({ error });
 
+    // Una semana cuyo viernes ya pasó no se manda a cocina: no queda ningún
+    // día por producir, y los días pasados son de solo lectura.
+    if (grilla.semanaTerminada(lunes)) {
+      return res.status(400).json({ error: 'Esa semana ya terminó: no se puede enviar a cocina' });
+    }
+
     const resultado = await grilla.enviarSemana(emp.empresa, lunes, req.user);
-    if (!resultado.ok) return res.status(400).json({ error: 'No se pudo enviar la semana', detalle: resultado });
+    if (!resultado.ok) {
+      const MOTIVOS = {
+        empresa_sin_grilla: 'Esa empresa no tiene grilla de comedor configurada',
+        ubicacion_ajena: 'La ubicación configurada en grilla_empresas no pertenece al cliente cuenta-empresa. Corregila antes de enviar.',
+      };
+      return res.status(400).json({ error: MOTIVOS[resultado.motivo] || 'No se pudo enviar la semana', detalle: resultado });
+    }
 
     // El pedido ya está guardado. Si el espejado falló, queda en sync_errores
     // y la respuesta lo informa, pero no se deshace nada (igual que la fase 6).
