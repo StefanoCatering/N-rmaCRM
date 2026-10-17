@@ -55,7 +55,7 @@
       <!-- Pedido general -->
       <div class="card">
         <div class="card-title">pedido general</div>
-        <div class="nota">Lo que no va por persona: sopa, ensalada mixta, jugo, vinagreta. Cantidad total por día.</div>
+        <div class="nota">Lo que se pide por cantidad y no por colaborador: sopa, jugo y ensalada mixta, pero también sándwiches, wraps o ensaladas. Cualquier plato del catálogo, con su total por día.</div>
         <div id="tabla-general"></div>
       </div>
 
@@ -532,25 +532,34 @@
       const dias = DATOS.dias;
 
       if (!DATOS.catalogo_general.length) {
-        cont.innerHTML = '<div class="empty-state">No hay ítems de pedido general cargados en el catálogo (categoría "General" de la tabla platos).</div>';
+        cont.innerHTML = '<div class="empty-state">No hay platos activos en el catálogo (tabla platos).</div>';
         return;
       }
 
       const porPlato = new Map(DATOS.general.map(g => [g.plato_id, g]));
 
-      const filas = DATOS.catalogo_general.map(item => {
-        const fila = porPlato.get(item.id);
-        const celdas = dias.map(fecha => {
-          const sinServicio = Object.prototype.hasOwnProperty.call(DATOS.dias_sin_servicio, fecha);
-          const valor = fila && fila.cantidades[fecha] !== undefined ? fila.cantidades[fecha] : '';
-          const puedeTocar = editable(fecha) && !sinServicio;
-          return `<td class="${sinServicio ? 'grilla-td-sin-servicio' : ''}">
-            <input type="number" min="0" step="1" class="grilla-input-cant g-cant"
-              data-plato="${item.id}" data-fecha="${fecha}" value="${valor}"
-              placeholder="0"${puedeTocar ? '' : ' disabled'}/>
-          </td>`;
+      // El catálogo viene agrupado por categoría: una fila de encabezado por
+      // grupo y abajo sus platos. Son todos los platos activos, así que sin el
+      // encabezado la lista no se podría recorrer.
+      const filas = DATOS.catalogo_general.map(grupo => {
+        const encabezado = `<tr class="grilla-grupo"><td class="grilla-col-nombre" colspan="${dias.length + 2}">${escapeHtml(grupo.categoria)}</td></tr>`;
+
+        const items = grupo.platos.map(item => {
+          const fila = porPlato.get(item.id);
+          const celdas = dias.map(fecha => {
+            const sinServicio = Object.prototype.hasOwnProperty.call(DATOS.dias_sin_servicio, fecha);
+            const valor = fila && fila.cantidades[fecha] !== undefined ? fila.cantidades[fecha] : '';
+            const puedeTocar = editable(fecha) && !sinServicio;
+            return `<td class="${sinServicio ? 'grilla-td-sin-servicio' : ''}">
+              <input type="number" min="0" step="1" class="grilla-input-cant g-cant"
+                data-plato="${item.id}" data-fecha="${fecha}" value="${valor}"
+                placeholder="0"${puedeTocar ? '' : ' disabled'}/>
+            </td>`;
+          }).join('');
+          return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(item.etiqueta)}</div></td>${celdas}<td class="grilla-col-acc"></td></tr>`;
         }).join('');
-        return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(item.etiqueta)}</div></td>${celdas}<td class="grilla-col-acc"></td></tr>`;
+
+        return encabezado + items;
       }).join('');
 
       cont.innerHTML = `
