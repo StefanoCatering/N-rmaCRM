@@ -32,7 +32,12 @@
 - **Producción:** Vercel, auto-deploy desde `main`.
 - **Supabase CRM:** ref `bjnwremoaooglpxrnzgi`
   - Conexión directa: `db.bjnwremoaooglpxrnzgi.supabase.co:5432`
-  - Pooler (recomendado en Vercel): `aws-0-us-east-1.pooler.supabase.com:6543`, requiere `DB_USER=postgres.bjnwremoaooglpxrnzgi`
+  - **Pooler (lo que usa producción): `aws-1-us-east-1.pooler.supabase.com:6543`**, requiere `DB_USER=postgres.bjnwremoaooglpxrnzgi`. Confirmado en los runtime logs de Vercel.
+
+> ⚠️ **El CRM corre detrás del pooler en MODO TRANSACCIÓN: prohibido usar locks o estado de sesión.**
+> En ese modo un statement suelto puede ejecutarse en cualquier backend del pool, y solo un `BEGIN…COMMIT` queda fijo a uno. Por lo tanto **nada** que viva a nivel de sesión es confiable: `pg_advisory_lock`/`pg_advisory_unlock`, `SET` sin `LOCAL`, `LISTEN`/`NOTIFY`, prepared statements con nombre, tablas temporales, `search_path` propio. El caso peligroso no es que no funcione, sino que *parezca* funcionar: un `pg_advisory_unlock` que cae en otro backend devuelve `false` sin error y deja el lock tomado para siempre en el backend original, colgando a todos los que vengan después hasta el timeout de Vercel.
+> Si hace falta serializar, usar `pg_advisory_xact_lock` dentro de una transacción explícita: lo libera Postgres en el COMMIT/ROLLBACK, pase lo que pase.
+> Ojo al probar en local contra un Postgres directo: **sin pooler, estos errores no se reproducen**.
 - **Supabase Narma Pedidos:** ref `rgppcvqoephcjjcnqwnz` — **otro proyecto**. Acá vive `pedidos_crm_detalle`, destino del sync. Su esquema lo gestiona el repo narma-pedidos; este repo solo la escribe.
 
 ---
@@ -290,7 +295,12 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 - **"Hoy" se calcula en `America/Asuncion`**, no en UTC ni con la hora del server (`ZONA_HORARIA` en `models/grilla.js`). Con UTC, a partir de las 21:00 de Paraguay el día en curso quedaría en solo lectura antes de tiempo.
 - **`platos.etiquetaPlato(categoria, nombre)` es la ÚNICA forma de nombrar un plato**: `Básicos` y `General` van sin prefijo (`Estándar`, `Jugo`), el resto con su categoría (`Pollo Grille · Papa`, `Ensaladas · César`). El nombre pelado no alcanza: `César` existe en Ensaladas y en Wraps, y `Papa` suelto no dice que es una guarnición. La etiqueta se arma **en el servidor** y viaja hecha a las vistas y a `pedidos_crm_detalle.plato_nombre`, que es lo único que ve cocina — las vistas no repiten la regla.
 - **La categoría `General`** (sopa, ensalada mixta, jugo, vinagreta) es un eje aparte: `models/platos.js` la excluye del catálogo por persona y solo entra por el pedido general. **El nombre de la categoría es parte del contrato** (`CATEGORIA_GENERAL`): renombrarla rompe la separación.
-- **`enviarSemana` está serializado con un advisory lock** por (empresa, semana), tomado en una conexión propia ANTES de leer y liberado después del sync. Los totales se calculan fuera de la transacción, así que sin el lock dos envíos solapados podían terminar con el que leyó datos viejos pisando al otro. El lock es por semana y empresa: no serializa envíos de semanas ni empresas distintas.
+- **`enviarSemana` está serializado por (empresa, semana) con `pg_advisory_xact_lock`** — un lock de **transacción**, nunca de sesión (ver la advertencia del pooler en la sección 2). Corre en dos transacciones, cada una abriendo con el mismo lock:
+  1. **conciliación**: toma el lock, *después* lee la grilla con el client de esa transacción (`cargarSemana`/`getEmpresa` aceptan un `ejecutor`), calcula los totales, crea o reusa el pedido, concilia las líneas y COMMIT.
+  2. **sync**: nueva transacción, mismo lock, y recién ahí `syncPedidos.sincronizarSinFallar`. Como el sync lee el estado ya commiteado del CRM solo cuando tiene el lock, el último en entrar es el que lee el estado final: no puede quedar una foto vieja pisando a una nueva en Narma Pedidos.
+  Se separan en dos porque el sync habla con **otra base**, y dejarlo dentro de la transacción de conciliación la mantendría abierta durante una llamada de red a otro proyecto.
+  La lectura tiene que ir **dentro** del lock: si quedara afuera, dos envíos podrían calcular sobre la misma foto y el segundo pisaría al primero. `POST /reintentar-sync` toma el mismo lock por el mismo motivo.
+  El lock es por empresa y semana: no serializa envíos de semanas ni de empresas distintas.
 - **El pedido semanal nace con `monto = 0`** y `estado_pago = 'pendiente'`: la facturación del comedor no pasa por el CRM en esta fase. Verificado que `pedidos.monto` no tiene CHECK.
 - **Los pedidos `origen='grilla'` están fuera de toda métrica de monto**: `PEDIDOS_AGG` y los tickets de `models/clientes.js` usan `FILTER (WHERE origen IS DISTINCT FROM 'grilla')`, y `routes/export.js` los excluye de las hojas y de los promedios. En el listado sí aparecen, con etiqueta "Grilla" y el monto en `—`.
 - **`grilla_empresas.ubicacion_id` tiene que ser una ubicación del cliente cuenta-empresa.** No se puede exigir con un CHECK, así que lo valida `enviarSemana`: si no corresponde, el envío se rechaza con un mensaje claro en vez de mandarle a producción la dirección de otro cliente.
@@ -323,4 +333,5 @@ No hay tests en el repo y la base de dev es la de prod, así que lo que se usó 
   - Pasarle `initdbFlags: ['--encoding=UTF8', '--locale=C']` (el default de la máquina es WIN1252 y los platos tienen acentos).
 - **Hay que habilitar SSL en el cluster de prueba**: los pools conectan con `ssl: { rejectUnauthorized: false }` y `pg` falla contra un servidor sin SSL. Generar un autofirmado con `openssl` en el data dir y agregar `ssl = on` + `ssl_cert_file` + `ssl_key_file` a `postgresql.conf` antes de arrancar.
 - Montar **dos bases**: `crm_test` (aplicarle `supabase/schema.sql` + las migraciones en orden) y `pedidos_test` con `pedidos_crm_detalle` según el contrato de `models/syncPedidos.js`. Así se puede verificar qué filas vería cocina de verdad.
+- **El entorno de prueba es un Postgres directo, sin pooler.** Todo lo que falle solo detrás de PgBouncer en modo transacción (ver la advertencia de la sección 2) es invisible acá. Para eso la suite incluye una guarda estática que revisa el código fuente: ningún archivo de `models/` ni `routes/` puede contener `pg_advisory_lock(` o `pg_advisory_unlock`.
 - Para QA visual por navegador sobre HTTP plano hay que sacar `upgrade-insecure-requests` de la CSP **en el arnés de prueba**, nunca en `server.js`.

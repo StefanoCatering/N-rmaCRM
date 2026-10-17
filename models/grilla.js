@@ -105,8 +105,8 @@ async function listEmpresas({ soloActivas = true } = {}) {
   return r.rows;
 }
 
-async function getEmpresa(empresa) {
-  const r = await pool.query(`
+async function getEmpresa(empresa, ejecutor = pool) {
+  const r = await ejecutor.query(`
     SELECT
       g.empresa, g.cliente_pedido_id, g.ubicacion_id, g.activa,
       c.nombre_completo AS cliente_nombre,
@@ -128,7 +128,11 @@ async function getEmpresa(empresa) {
 // de grilla y la hoja del día: planes, celdas, días sin servicio y pedido
 // general. Cuatro consultas fijas, sin N+1 por colaborador ni por día.
 
-async function cargarSemana(empresa, lunes) {
+// ejecutor: por defecto el pool, pero enviarSemana le pasa el client de su
+// transacción para que la lectura quede DENTRO del advisory lock. Sobre un
+// client las 4 consultas del Promise.all se encolan en vez de ir en paralelo;
+// es correcto igual y a este volumen no se nota.
+async function cargarSemana(empresa, lunes, ejecutor = pool) {
   const dias = diasDeSemana(lunes);
   const primero = dias[0];
   const ultimo = dias[dias.length - 1];
@@ -137,7 +141,7 @@ async function cargarSemana(empresa, lunes) {
     // Colaboradores con plan activo en ALGÚN día de la semana. El solapamiento
     // es el estándar: alta <= último día y (sin baja o baja > primer día).
     // fecha_baja es exclusiva: el primer día que la persona ya NO come.
-    pool.query(`
+    ejecutor.query(`
       SELECT
         p.cliente_id, p.plato_base_id, p.observacion, p.fecha_alta, p.fecha_baja,
         c.nombre_completo, c.cedula, c.estado,
@@ -151,7 +155,7 @@ async function cargarSemana(empresa, lunes) {
       ORDER BY c.nombre_completo ASC
     `, [empresa, primero, ultimo]),
 
-    pool.query(`
+    ejecutor.query(`
       SELECT ce.id, ce.cliente_id, ce.fecha, ce.plato_id, ce.ausencia, ce.comentario,
              ce.updated_at, pl.nombre AS plato_nombre
       FROM grilla_celdas ce
@@ -160,12 +164,12 @@ async function cargarSemana(empresa, lunes) {
       WHERE c.empresa = $1 AND ce.fecha >= $2 AND ce.fecha <= $3
     `, [empresa, primero, ultimo]),
 
-    pool.query(`
+    ejecutor.query(`
       SELECT fecha, motivo FROM grilla_sin_servicio
       WHERE empresa = $1 AND fecha >= $2 AND fecha <= $3
     `, [empresa, primero, ultimo]),
 
-    pool.query(`
+    ejecutor.query(`
       SELECT g.fecha, g.plato_id, g.cantidad, pl.nombre AS plato_nombre
       FROM grilla_general g
       JOIN platos pl ON pl.id = g.plato_id
@@ -400,49 +404,86 @@ function semanaTerminada(lunes) {
   return detalle.sumarDias(lunes, 4) < hoyISO();
 }
 
-// Envía (o reenvía) una semana a cocina.
+// ── Serialización por (empresa, semana) ──────────────────────────────────
 //
-// Serializado por (empresa, semana) con un advisory lock: el cálculo de
-// totales se hace ANTES de la transacción, así que dos escrituras seguidas
-// podían disparar dos envíos donde el que leyó datos viejos commiteaba último
-// y quedaba como versión final, tanto en el CRM como en Narma Pedidos. El lock
-// se toma en una conexión propia y cubre TODO: lectura, cálculo, conciliación
-// y sync. Es por semana y empresa, así que no serializa envíos de semanas
+// En producción el CRM entra por el pooler de Supabase en MODO TRANSACCIÓN
+// (puerto 6543). Ahí cada statement suelto puede ejecutarse en un backend
+// distinto, así que los locks de SESIÓN (pg_advisory_lock / _unlock) son
+// inservibles y además peligrosos: el unlock puede caer en otro backend,
+// devolver false, y dejar el lock tomado en el backend original para siempre.
+// Desde ese momento todo envío de esa (empresa, semana) se cuelga.
+//
+// Por eso se usa pg_advisory_xact_lock, que es un lock de TRANSACCIÓN: solo
+// existe dentro de un BEGIN…COMMIT —que el pooler sí mantiene fijo a un
+// backend— y Postgres lo libera solo al COMMIT o al ROLLBACK, incluso si el
+// proceso se muere o Vercel corta la función. No hay nada que liberar a mano.
+//
+// La clave es por empresa y semana, así que no serializa envíos de semanas
 // distintas ni de otras empresas.
-//
-// Todo el lado CRM va en UNA transacción; recién después se llama UNA vez al
-// sync, que es del pedido completo. Si el sync falla, lo guardado en el CRM
-// queda igual y la respuesta lo informa (mismo criterio que la fase 6).
-async function enviarSemana(empresa, lunes, usuario) {
-  const candado = await pool.connect();
+function tomarLockSemana(client, empresa, lunes) {
+  return client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [claveSemana(empresa, lunes)]);
+}
+
+// Corre fn dentro de una transacción que arranca tomando el lock de la semana.
+async function conLockDeSemana(empresa, lunes, fn) {
+  const client = await pool.connect();
   try {
-    await candado.query('SELECT pg_advisory_lock(hashtext($1))', [claveSemana(empresa, lunes)]);
-    return await enviarSemanaBloqueada(empresa, lunes, usuario);
+    await client.query('BEGIN');
+    await tomarLockSemana(client, empresa, lunes);
+    const r = await fn(client);
+    await client.query('COMMIT');
+    return r;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
-    await candado.query('SELECT pg_advisory_unlock(hashtext($1))', [claveSemana(empresa, lunes)])
-      .catch(err => console.error('[grilla] No se pudo liberar el lock de envío:', err.message));
-    candado.release();
+    client.release();
   }
 }
 
-async function enviarSemanaBloqueada(empresa, lunes, usuario) {
-  const emp = await getEmpresa(empresa);
-  if (!emp) return { ok: false, motivo: 'empresa_sin_grilla' };
+// Espeja el pedido hacia Narma Pedidos bajo el lock de la semana.
+//
+// Va en su propia transacción, DESPUÉS de que la conciliación commiteó. El
+// sync lee el estado ya commiteado del CRM recién cuando tiene el lock, así
+// que el último en entrar es el que lee el estado final: no puede quedar una
+// foto vieja pisando a una nueva del lado de Pedidos.
+//
+// La transacción de acá no escribe nada en el CRM: existe solo para sostener
+// el lock mientras corre el sync.
+async function sincronizarConLock(empresa, lunes, pedidoId) {
+  return conLockDeSemana(empresa, lunes, () => syncPedidos.sincronizarSinFallar(pedidoId));
+}
 
-  // La ubicación configurada tiene que ser una del cliente cuenta-empresa: es
-  // la dirección que se denormaliza en pedidos_crm_detalle y por la que sale
-  // el reparto. No se puede exigir con un CHECK (necesitaría leer otra tabla),
-  // así que se valida acá, que es el único punto por donde pasa al pedido.
-  if (!emp.ubicacion_valida) return { ok: false, motivo: 'ubicacion_ajena' };
+// Envía (o reenvía) una semana a cocina.
+//
+// Dos fases, cada una con su propia transacción y el mismo advisory lock de
+// transacción:
+//   1. conciliación — lee la grilla, calcula los totales y deja las líneas del
+//      pedido iguales a esos totales. Todo o nada.
+//   2. sync — espeja el pedido completo hacia Narma Pedidos.
+//
+// Se separan porque el sync habla con OTRA base: dejarlo dentro de la
+// transacción de conciliación significaría mantenerla abierta durante una
+// llamada de red a otro proyecto. Con el lock tomado en las dos, el orden
+// entre envíos concurrentes se respeta igual.
+//
+// Si el sync falla, lo guardado en el CRM queda igual y la respuesta lo
+// informa (mismo criterio que la fase 6).
+async function enviarSemana(empresa, lunes, usuario) {
+  const resultado = await conLockDeSemana(empresa, lunes, async (client) => {
+    const emp = await getEmpresa(empresa, client);
+    if (!emp) return { ok: false, motivo: 'empresa_sin_grilla' };
 
-  const datos = await cargarSemana(empresa, lunes);
-  const totales = totalesDesdeDatos(datos);
+    // La ubicación configurada tiene que ser una del cliente cuenta-empresa:
+    // es la dirección que se denormaliza en pedidos_crm_detalle y por la que
+    // sale el reparto. No se puede exigir con un CHECK (necesitaría leer otra
+    // tabla), así que se valida acá, el único punto por donde pasa al pedido.
+    if (!emp.ubicacion_valida) return { ok: false, motivo: 'ubicacion_ajena' };
 
-  const client = await pool.connect();
-  let pedido;
-  let resumen;
-  try {
-    await client.query('BEGIN');
+    // La lectura va dentro del lock: si quedara afuera, dos envíos podrían
+    // calcular con la misma foto y el segundo pisaría al primero.
+    const datos = await cargarSemana(empresa, lunes, client);
+    const totales = totalesDesdeDatos(datos);
 
     const existente = await client.query(
       `SELECT * FROM pedidos
@@ -450,7 +491,7 @@ async function enviarSemanaBloqueada(empresa, lunes, usuario) {
        FOR UPDATE`,
       [emp.cliente_pedido_id, lunes]
     );
-    pedido = existente.rows[0];
+    let pedido = existente.rows[0];
 
     if (!pedido) {
       // monto = 0 y estado_pago 'pendiente': la facturación del comedor no es
@@ -474,26 +515,22 @@ async function enviarSemanaBloqueada(empresa, lunes, usuario) {
       )).rows[0];
     }
 
-    resumen = await conciliarLineas(client, pedido.id, totales);
+    const resumen = await conciliarLineas(client, pedido.id, totales);
+    return { ok: true, pedido, resumen };
+  });
 
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    client.release();
-    throw err;
-  }
-  client.release();
+  if (!resultado.ok) return resultado;
 
   // El sync nunca lanza: devuelve { ok: false, ... } y deja el intento en
   // sync_errores para poder reenviarlo desde "Reintentar".
-  const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+  const sync = await sincronizarConLock(empresa, lunes, resultado.pedido.id);
 
   await auditar(
     usuario && usuario.id, 'grilla_envio', claveSemana(empresa, lunes), null,
-    { pedido_id: pedido.id, resumen, sync }
+    { pedido_id: resultado.pedido.id, resumen: resultado.resumen, sync }
   );
 
-  return { ok: true, pedido, resumen, sync };
+  return { ...resultado, sync };
 }
 
 // Reenvía automáticamente las semanas afectadas por una escritura, pero SOLO
@@ -876,6 +913,7 @@ module.exports = {
   calcularTotales, totalesDesdeDatos,
   // escritura
   auditar, enviarSemana, reenviarSiCorresponde, enTransaccion,
+  conLockDeSemana, sincronizarConLock,
   upsertCelda, borrarCelda, upsertCeldasRango,
   setSinServicio, borrarSinServicio, setGeneral,
   crearPlanes, actualizarPlan,

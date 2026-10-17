@@ -638,7 +638,10 @@ router.post('/reintentar-sync', requireEditarGrilla, async (req, res, next) => {
     const pedido = await grilla.getPedidoSemana(emp.empresa, lunes);
     if (!pedido) return res.status(404).json({ error: 'Esa semana todavía no fue enviada a cocina' });
 
-    const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
+    // Bajo el mismo lock de semana que usa enviarSemana: un reintento manual
+    // puede coincidir con un reenvío automático, y sin el lock el que lee
+    // primero podría espejar un estado más viejo.
+    const sync = await grilla.sincronizarConLock(emp.empresa, lunes, pedido.id);
     await grilla.auditar(
       req.user.id, 'grilla_envio', grilla.claveSemana(emp.empresa, lunes), null,
       { pedido_id: pedido.id, reintento: true, sync }
