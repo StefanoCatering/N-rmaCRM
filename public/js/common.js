@@ -51,6 +51,12 @@ const CANAL_LABEL = {
 const MEDIO_PAGO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', pos: 'POS', cortesia: 'Cortesía' };
 const ESTADO_PAGO_LABEL = { pagado: 'Pagado', pendiente: 'Pendiente', parcial: 'Parcial' };
 const TIPO_VIANDA_LABEL = { economico: 'Económico', saludable: 'Saludable', low_carb: 'Low Carb', modificacion_menu: 'Modificación de menú' };
+// Motivos de ausencia de la grilla de comedor. Las claves son los valores del
+// CHECK de grilla_celdas.ausencia: si se agrega uno, va en los dos lados.
+const AUSENCIA_LABEL = {
+  home_office: 'Home office', vacaciones: 'Vacaciones', reposo: 'Reposo',
+  licencia: 'Licencia', otro: 'Otro',
+};
 
 function badgeEstado(estado) {
   return `<span class="badge badge-${estado}">${ESTADO_LABEL[estado] || estado}</span>`;
@@ -91,6 +97,11 @@ function renderNav(activeHref) {
   links.push(['/clientes', 'Clientes']);
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'operador') {
     links.push(['/pedidos', 'Pedidos']);
+  }
+  // La grilla la ven admin, visor y quien tenga gestiona_grilla (que puede ser
+  // un operador: es un permiso aparte del rol). Para el resto, ni aparece.
+  if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor' || CURRENT_USER.gestiona_grilla) {
+    links.push(['/grilla', 'Grilla']);
   }
 
   const linksHtml = links.map(([href, label]) => {

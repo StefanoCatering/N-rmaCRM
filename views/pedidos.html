@@ -405,27 +405,37 @@
                 <tr><th>Cliente</th><th>Segmento</th><th>Fecha pedido</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${esAdmin ? '<th>Acciones</th>' : ''}</tr>
               </thead>
               <tbody>
-                ${pedidos.map(p => `
+                ${pedidos.map(p => {
+                  // Los pedidos de la grilla de comedor se listan, pero no se
+                  // tocan desde acá: los arma y los reescribe la grilla
+                  // semanal, y el backend rechaza cualquier edición.
+                  const deGrilla = p.origen === 'grilla';
+                  return `
                   <tr${p.cancelado ? ' style="opacity:0.55;"' : ''}>
-                    <td style="white-space:normal;min-width:160px;"><strong>${escapeHtml(p.nombre_completo)}</strong></td>
+                    <td style="white-space:normal;min-width:160px;"><strong>${escapeHtml(p.nombre_completo)}</strong>
+                      ${deGrilla ? '<span class="badge badge-info" style="margin-left:6px;">Grilla</span>' : ''}</td>
                     <td>${SEGMENTO_LABEL[p.segmento]}</td>
                     <td>${fmtFecha(p.fecha_pedido)}</td>
-                    <td><strong>${fmtGs(p.monto)}</strong></td>
+                    <td><strong>${deGrilla ? '<span class="text-muted">—</span>' : fmtGs(p.monto)}</strong></td>
                     <td style="white-space:nowrap;">
                       ${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : `
                         ${badgeEstadoPago(p.estado_pago)}
-                        ${puedeEditar ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-monto-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>`
+                        ${puedeEditar && !deGrilla ? `<button class="btn-secondary btn-editar-pago" data-id="${p.id}" data-estado="${p.estado_pago}" data-monto="${p.monto}" data-monto-pagado="${p.monto_pagado != null ? p.monto_pagado : ''}" style="padding:2px 8px;font-size:9px;margin-left:6px;">Editar</button>`
                       : ''}`}
                     </td>
-                    <td style="white-space:normal;">${p.descripcion ? escapeHtml(p.descripcion) : '—'}<a href="/pedidos/${p.id}/editar" class="nota" style="display:block;margin-top:4px;">líneas y excepciones →</a></td>
+                    <td style="white-space:normal;">${p.descripcion ? escapeHtml(p.descripcion) : '—'}
+                      ${deGrilla
+                        ? `<a href="/grilla?empresa=${encodeURIComponent(p.empresa || '')}&lunes=${encodeURIComponent(String(p.semana_lunes || '').slice(0, 10))}" class="nota" style="display:block;margin-top:4px;">ver la grilla de la semana →</a>`
+                        : `<a href="/pedidos/${p.id}/editar" class="nota" style="display:block;margin-top:4px;">líneas y excepciones →</a>`}</td>
                     ${esAdmin ? `<td style="white-space:nowrap;">
-                      ${!p.cancelado ? `
+                      ${!p.cancelado && !deGrilla ? `
                         <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
                         <button class="btn-secondary btn-cancelar-pedido" data-id="${p.id}" style="padding:2px 8px;font-size:9px;margin-left:4px;">Cancelar</button>
                       ` : ''}
+                      ${deGrilla ? '<span class="text-muted" style="font-size:9px;">Se gestiona desde la grilla</span>' : ''}
                     </td>` : ''}
                   </tr>
-                `).join('')}
+                `;}).join('')}
               </tbody>
             </table>
           </div>
@@ -442,11 +452,17 @@
         });
       }
 
-      const totalMonto = pedidos.reduce((sum, p) => sum + Number(p.monto || 0), 0);
+      // El pedido semanal de la grilla de comedor no entra en el total: tiene
+      // monto 0 porque su facturación no pasa por el CRM, y mostrarlo como
+      // parte del período daría a entender que se facturó por Gs. 0.
+      const deFacturacion = pedidos.filter(p => p.origen !== 'grilla');
+      const deGrilla = pedidos.length - deFacturacion.length;
+      const totalMonto = deFacturacion.reduce((sum, p) => sum + Number(p.monto || 0), 0);
       document.getElementById('resumen-grid').innerHTML = `
         <div class="metric metric-blue">
           <div class="metric-label">Cantidad de pedidos</div>
           <div class="metric-value">${pedidos.length}</div>
+          ${deGrilla ? `<div class="metric-sub">${deGrilla} de la grilla de comedor, sin monto</div>` : ''}
         </div>
         <div class="metric metric-green">
           <div class="metric-label">Total del período</div>

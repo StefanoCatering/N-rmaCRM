@@ -21,4 +21,13 @@ async function create({ username, password_hash, rol }) {
   return findById(result.rows[0].id);
 }
 
-module.exports = { findByUsername, findById, create };
+// ¿Este usuario tiene el permiso de edición de la grilla semanal de comedor?
+// Se lee de la base en cada request de escritura (y no del JWT) a propósito:
+// sacarle el permiso a alguien tiene que aplicar en el acto, sin esperar a que
+// se le venza el token de 8 horas.
+async function gestionaGrilla(id) {
+  const result = await pool.query('SELECT gestiona_grilla FROM usuarios WHERE id = $1', [id]);
+  return result.rows.length ? result.rows[0].gestiona_grilla === true : false;
+}
+
+module.exports = { findByUsername, findById, create, gestionaGrilla };

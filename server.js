@@ -11,6 +11,7 @@ const usuarios = require('./models/usuarios');
 const clientesRouter = require('./routes/clientes');
 const pedidosRouter  = require('./routes/pedidos');
 const platosRouter   = require('./routes/platos');
+const grillaRouter   = require('./routes/grilla');
 const exportRouter   = require('./routes/export');
 
 // Validación de arranque: JWT_SECRET es obligatorio
@@ -145,8 +146,15 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/me', requireAuth(), (req, res) => {
-  res.json({ user: req.user, alertDays: config.ALERT_DAYS });
+// gestiona_grilla sale de la BASE y no del JWT: así, si se le saca el permiso
+// a alguien, el link de la grilla desaparece en la siguiente carga de página y
+// no cuando se le vence el token de 8 horas. Es la misma lectura que hacen los
+// middlewares de routes/grilla.js, que son los que de verdad cortan el acceso.
+app.get('/api/me', requireAuth(), async (req, res, next) => {
+  try {
+    const gestiona_grilla = await usuarios.gestionaGrilla(req.user.id);
+    res.json({ user: { ...req.user, gestiona_grilla }, alertDays: config.ALERT_DAYS });
+  } catch (err) { next(err); }
 });
 
 // ── Páginas ───────────────────────────────────────────────────────
@@ -186,11 +194,31 @@ app.get('/pedidos', requireAuth(['admin', 'operador']), view('pedidos.html'));
 // Se registra después de /pedidos/nuevo para que esa ruta literal gane.
 app.get('/pedidos/:id/editar', requireAuth(['admin', 'operador']), view('pedido-detalle.html'));
 
+// Grilla semanal de comedor (fase 7). La ven admin, visor y quien tenga
+// gestiona_grilla; la edita SOLO quien tenga gestiona_grilla, y eso lo
+// verifica routes/grilla.js en cada request. Este guard es para la página:
+// sin él, cualquier operador vería el cascarón de la grilla y recién al
+// cargar los datos se encontraría con un 403.
+//
+// El permiso no se puede expresar con requireAuth(rol) porque no es un rol:
+// Admin1, que es quien edita la grilla, tiene rol 'operador'.
+async function requireVistaGrilla(req, res, next) {
+  try {
+    if (req.user.rol === 'admin' || req.user.rol === 'visor') return next();
+    if (await usuarios.gestionaGrilla(req.user.id)) return next();
+    return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
+  } catch (err) { next(err); }
+}
+
+app.get('/grilla/dia', requireAuth(), requireVistaGrilla, view('grilla-dia.html'));
+app.get('/grilla', requireAuth(), requireVistaGrilla, view('grilla.html'));
+
 // ── API de negocio ────────────────────────────────────────────────
 
 app.use('/api/clientes', requireAuth(), clientesRouter);
 app.use('/api/pedidos',  requireAuth(), pedidosRouter);
 app.use('/api/platos',   requireAuth(), platosRouter);
+app.use('/api/grilla',   requireAuth(), grillaRouter);
 app.use('/api/export',   requireAuth(), exportRouter);
 
 app.use((req, res) => {

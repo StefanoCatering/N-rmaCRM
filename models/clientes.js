@@ -3,13 +3,20 @@ const { ALERT_DAYS } = require('../config');
 
 // Subquery que agrega los campos calculados de pedidos por cliente.
 // dias_sin_pedir: días completos entre hoy y el último pedido (EXTRACT sobre intervalo).
+//
+// El FILTER de los tickets deja afuera los pedidos de la grilla de comedor
+// (fase 7): nacen con monto = 0 porque la facturación del comedor no pasa por
+// el CRM, así que sumarlos hundiría el ticket promedio de la cuenta empresa.
+// La cuenta de pedidos y la fecha del último sí los incluyen: son pedidos
+// reales y la cuenta empresa no está "sin pedir" solo porque no se le factura
+// desde acá.
 const PEDIDOS_AGG = `
   SELECT
     cliente_id,
     COUNT(*)::integer                                   AS cantidad_pedidos,
     MAX(fecha_pedido)                                   AS ultimo_pedido,
-    AVG(monto)::float                                   AS ticket_promedio,
-    SUM(monto)::float                                   AS ticket_total
+    AVG(monto) FILTER (WHERE origen IS DISTINCT FROM 'grilla')::float AS ticket_promedio,
+    SUM(monto) FILTER (WHERE origen IS DISTINCT FROM 'grilla')::float AS ticket_total
   FROM pedidos
   GROUP BY cliente_id
 `;
@@ -214,6 +221,7 @@ async function ticketPromedioGeneral(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
     SELECT AVG(monto)::float AS prom FROM pedidos
     WHERE cancelado = false
+      AND origen IS DISTINCT FROM 'grilla'
       AND fecha_pedido >= $1 AND fecha_pedido <= $2
   `, [fecha_desde, fecha_hasta]);
   return r.rows[0].prom || 0;
@@ -225,6 +233,7 @@ async function ticketPromedioPorSegmento(fecha_desde, fecha_hasta) {
     FROM clientes c
     JOIN pedidos pe ON pe.cliente_id = c.id
     WHERE pe.cancelado = false
+      AND pe.origen IS DISTINCT FROM 'grilla'
       AND pe.fecha_pedido >= $1 AND pe.fecha_pedido <= $2
     GROUP BY c.segmento
   `, [fecha_desde, fecha_hasta])).rows;

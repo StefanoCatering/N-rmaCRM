@@ -334,3 +334,71 @@ input:focus, select:focus, textarea:focus { border-color: var(--orange); backgro
 .chart-mini-bar { width: 100%; border-radius: 4px 4px 1px 1px; transition: height 0.3s; }
 .chart-mini-bar-value { font-size: 8px; color: var(--navy); font-weight: 600; margin-bottom: 3px; }
 .chart-group-label { font-size: 9px; color: var(--text3); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+/* ══════════════════════════════════════════════════════
+   GRILLA DE COMEDOR (fase 7)
+   Tabla colaborador × lunes-viernes. Cada celda muestra el plato EFECTIVO
+   de ese día: el del plan atenuado, el cambio resaltado, la ausencia en
+   otro color. Lo que se lee de un vistazo es lo que se aparta de lo normal.
+   ══════════════════════════════════════════════════════ */
+.grilla-tabla { table-layout: fixed; }
+.grilla-tabla th, .grilla-tabla td { padding: 5px 6px; }
+.grilla-col-nombre { width: 210px; }
+.grilla-col-dia    { width: 118px; }
+.grilla-col-acc    { width: 92px; }
+
+.grilla-nombre { font-size: 11px; font-weight: 600; white-space: normal; }
+.grilla-sub    { font-size: 9px; color: var(--text3); font-weight: 400; }
+.grilla-obs    { font-size: 9px; color: var(--orange); font-weight: 600; }
+
+/* Encabezado de día */
+.grilla-dia-head { text-align: center; }
+.grilla-dia-nombre { font-size: 10px; font-weight: 600; color: var(--navy); text-transform: uppercase; }
+.grilla-dia-fecha  { font-size: 9px; color: var(--text3); font-weight: 400; }
+.grilla-dia-hoy .grilla-dia-nombre { color: var(--orange); }
+.grilla-dia-acciones { margin-top: 4px; display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; }
+.grilla-mini {
+  font-family: var(--font); font-size: 8px; letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 100px; border: 1px solid var(--border2);
+  background: white; color: var(--text2); cursor: pointer;
+}
+.grilla-mini:hover { background: var(--beige); }
+.grilla-mini:disabled { opacity: 0.4; cursor: default; }
+
+/* Celdas */
+.grilla-celda {
+  width: 100%; min-height: 30px; text-align: left; cursor: pointer;
+  font-family: var(--font); font-size: 10px; line-height: 1.25;
+  padding: 5px 7px; border-radius: 7px; border: 1px solid transparent;
+  background: transparent; color: var(--text); display: block;
+}
+.grilla-celda:hover { border-color: var(--border2); background: white; }
+.grilla-celda-base   { color: var(--text3); }                                     /* plato del plan */
+.grilla-celda-cambio { background: #E8EEF8; border-color: rgba(37,78,169,0.3); color: var(--navy); font-weight: 600; }
+.grilla-celda-ausencia { background: #FFF0EC; border-color: rgba(255,61,3,0.3); color: var(--orange); font-weight: 600; }
+.grilla-celda-fuera  { color: var(--text3); opacity: 0.45; cursor: default; font-style: italic; }
+.grilla-celda-bloqueada { cursor: default; }
+.grilla-celda-bloqueada:hover { border-color: transparent; background: transparent; }
+.grilla-celda-nota { display: block; font-size: 8px; font-weight: 400; opacity: 0.85; margin-top: 2px; }
+
+/* Día sin servicio: la columna entera queda apagada */
+.grilla-td-sin-servicio { background: repeating-linear-gradient(45deg, rgba(8,43,85,0.04), rgba(8,43,85,0.04) 6px, transparent 6px, transparent 12px); }
+.grilla-sin-servicio-texto { font-size: 9px; color: var(--text3); text-align: center; display: block; padding: 6px 0; }
+
+/* Pedido general y totales */
+.grilla-input-cant {
+  width: 100%; max-width: 70px; font-family: var(--font); font-size: 11px; text-align: center;
+  padding: 4px 6px; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--text);
+}
+.grilla-input-cant:disabled { background: var(--beige); color: var(--text3); }
+.grilla-total      { text-align: center; font-weight: 600; font-size: 11px; }
+.grilla-total-cero { color: var(--text3); font-weight: 400; }
+.grilla-fila-total td { background: var(--beige); font-weight: 600; }
+
+/* Hoja del día imprimible */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; font-size: 12px; }
+  .app { padding: 0; }
+  .card { border: none; box-shadow: none; padding: 0 0 10px; margin-bottom: 10px; break-inside: avoid; }
+  .hoja-grupo { break-inside: avoid; }
+}

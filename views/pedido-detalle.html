@@ -20,6 +20,7 @@
         <a href="/pedidos" class="btn-secondary">← Volver</a>
       </div>
 
+      <div id="aviso-grilla" class="nota hidden"></div>
       <div id="aviso-sync" class="form-error hidden"></div>
       <div id="error-global" class="form-error hidden"></div>
 
@@ -28,7 +29,7 @@
         <div class="card-title">datos del pedido</div>
         <div class="cliente-info-grid" id="info-pedido"></div>
 
-        <div class="form-group mt-12">
+        <div class="form-group mt-12" id="grupo-ubicacion">
           <label class="form-label">Ubicación de entrega</label>
           <select id="f-ubicacion"><option value="">— Sin especificar —</option></select>
           <div class="nota mt-8" id="nota-ubicacion"></div>
@@ -144,11 +145,36 @@
       renderNuevaLinea();
       await cargarAuditoria();
 
-      // Un pedido cancelado no se edita más: el backend lo rechaza, así que la
-      // UI tampoco lo ofrece.
-      const bloqueado = PEDIDO.cancelado || CURRENT_USER.rol !== 'admin';
+      // Un pedido cancelado no se edita más, y uno de la grilla de comedor
+      // tampoco: en los dos casos el backend lo rechaza, así que la UI no
+      // ofrece lo que no va a poder hacer.
+      const bloqueado = PEDIDO.cancelado || esDeGrilla() || CURRENT_USER.rol !== 'admin';
       document.getElementById('card-agregar').classList.toggle('hidden', bloqueado);
       document.getElementById('btn-guardar-ubicacion').disabled = bloqueado;
+      // En un pedido de grilla la ubicación la define grilla_empresas: dejar el
+      // selector a la vista (aunque esté deshabilitado) haría pensar que se
+      // puede cambiar desde acá. Se oculta y la dirección se muestra como dato.
+      document.getElementById('grupo-ubicacion').classList.toggle('hidden', esDeGrilla());
+      avisarGrilla();
+    }
+
+    function esDeGrilla() {
+      return PEDIDO && PEDIDO.origen === 'grilla';
+    }
+
+    // Aviso fijo cuando el pedido lo gobierna la grilla semanal: explica por
+    // qué no hay botones, en lugar de dejar la pantalla muda.
+    function avisarGrilla() {
+      const box = document.getElementById('aviso-grilla');
+      if (!esDeGrilla()) { box.classList.add('hidden'); return; }
+      const semana = PEDIDO.semana_lunes ? String(PEDIDO.semana_lunes).slice(0, 10) : '';
+      box.innerHTML = 'Este pedido se gestiona desde la grilla semanal: sus líneas son el total '
+        + 'calculado por plato y día, y se reescriben solas en cada envío. '
+        + 'Para cambiar algo, editá la grilla'
+        + (semana ? ` de la semana del ${fmtFecha(semana)}` : '')
+        + '. '
+        + `<a href="/grilla?lunes=${encodeURIComponent(semana)}"><strong>Ir a la grilla →</strong></a>`;
+      box.classList.remove('hidden');
     }
 
     function renderInfo() {
@@ -167,6 +193,9 @@
           <div class="cliente-info-value">${fmtGs(p.monto)}</div></div>
         <div class="cliente-info-item"><span class="form-label">Estado</span>
           <div class="cliente-info-value">${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : badgeEstadoPago(p.estado_pago)}</div></div>
+        ${esDeGrilla() ? `
+        <div class="cliente-info-item"><span class="form-label">Ubicación de entrega</span>
+          <div class="cliente-info-value">${escapeHtml([p.ubicacion_direccion, p.ubicacion_zona].filter(Boolean).join(' · ') || 'Sin especificar')}</div></div>` : ''}
       `;
     }
 
@@ -235,7 +264,7 @@
 
       const esAdmin = CURRENT_USER.rol === 'admin';
       cont.innerHTML = lineas.map(l => {
-        const editable = esAdmin && !l.cancelado && !PEDIDO.cancelado;
+        const editable = esAdmin && !l.cancelado && !PEDIDO.cancelado && !esDeGrilla();
         return `
         <div class="card" style="padding:12px;margin-bottom:10px;" data-linea="${l.id}">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">

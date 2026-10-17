@@ -45,6 +45,17 @@ function msUTC(iso) {
 
 const UN_DIA_MS = 24 * 60 * 60 * 1000;
 
+// Desplaza una fecha ISO n días (n puede ser negativo). La grilla semanal
+// (fase 7) la usa para recorrer de lunes a viernes.
+function sumarDias(iso, n) {
+  return isoDesdeUTC(msUTC(iso) + n * UN_DIA_MS);
+}
+
+// Día de la semana de una fecha ISO, 0 = domingo … 6 = sábado.
+function diaSemana(iso) {
+  return new Date(msUTC(iso)).getUTCDay();
+}
+
 // Cantidad de días calendario que abarca un rango, bordes incluidos.
 function diasEnRango(desdeISO, hastaISO) {
   return Math.floor((msUTC(hastaISO) - msUTC(desdeISO)) / UN_DIA_MS) + 1;
@@ -255,7 +266,7 @@ async function deleteExcepcion(id, ejecutor = pool) {
 
 module.exports = {
   // resolución de fechas
-  resolverEntregas, expandirHabiles, diasEnRango, aISO,
+  resolverEntregas, expandirHabiles, diasEnRango, aISO, sumarDias, diaSemana,
   MAX_DIAS_RANGO, DIAS_HABILES,
   // lectura
   listByPedido, getById, listExcepciones, excepcionesPorLinea, getExcepcionById,
