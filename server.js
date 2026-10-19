@@ -54,14 +54,28 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Middleware de autenticación / autorización ────────────────────
 // requireAuth(rol?)
-//   Sin argumento → sólo verifica que haya un JWT válido.
+//   Sin argumento → sólo verifica que el usuario esté autenticado y activo.
 //   Con 'admin' u 'operador' → también verifica el rol.
 //   Rutas /api/* → respuesta JSON 401/403.
 //   Páginas → redirect a /login.
+//
+// El JWT solo dice QUIÉN es (id). Lo demás —si sigue existiendo, si está
+// activo, qué rol tiene— se lee de la base en cada request, en una sola
+// consulta por clave primaria (fase 8). Así desactivar a alguien o cambiarle
+// el rol aplica en el acto y no cuando se le vence el token de 8 horas, que
+// era lo que pasaba cuando el middleware confiaba solo en el payload.
 function requireAuth(rol) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const token = req.cookies.narma_token;
     const isApi = req.originalUrl.startsWith('/api/');
+
+    // Cookie afuera y 401 (API) o /login (páginas). Limpiar la cookie es lo
+    // que corta el ciclo: sin ella, /login ya no rebota de vuelta a la página.
+    const rechazar = () => {
+      res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'lax' });
+      if (isApi) return res.status(401).json({ error: 'No autenticado' });
+      return res.redirect('/login');
+    };
 
     if (!token) {
       console.log('[requireAuth] sin token | path:', req.originalUrl);
@@ -69,9 +83,33 @@ function requireAuth(rol) {
       return res.redirect('/login');
     }
 
+    let payload;
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
-      req.user = { id: payload.id, username: payload.username, rol: payload.rol };
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch (e) {
+      console.log('[requireAuth] token inválido:', e.message, '| path:', req.originalUrl);
+      return rechazar();
+    }
+
+    try {
+      const usuario = await usuarios.findForAuth(payload.id);
+      if (!usuario) {
+        console.log('[requireAuth] usuario inexistente | id:', payload.id, '| path:', req.originalUrl);
+        return rechazar();
+      }
+      if (usuario.activo !== true) {
+        console.log('[requireAuth] usuario desactivado | user:', usuario.username, '| path:', req.originalUrl);
+        return rechazar();
+      }
+
+      // Todo sale de la base, no del token: el username también, así un
+      // renombre se ve en el acto y la auditoría guarda el nombre vigente.
+      req.user = {
+        id: usuario.id,
+        username: usuario.username,
+        rol: usuario.rol,
+        gestiona_grilla: usuario.gestiona_grilla === true,
+      };
       console.log(
         '[requireAuth] OK | user:', req.user.username,
         '| rol requerido:', rol || 'cualquiera',
@@ -87,12 +125,7 @@ function requireAuth(rol) {
       }
 
       next();
-    } catch (e) {
-      console.log('[requireAuth] token inválido:', e.message, '| path:', req.originalUrl);
-      res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'lax' });
-      if (isApi) return res.status(401).json({ error: 'No autenticado' });
-      return res.redirect('/login');
-    }
+    } catch (err) { next(err); }
   };
 }
 
@@ -108,6 +141,18 @@ const loginLimiter = rateLimit({
   message: { error: 'Demasiados intentos de inicio de sesión. Probá de nuevo en unos minutos.' },
 });
 
+// Mismo criterio que loginLimiter, con su propio contador: cambiar la
+// contraseña exige la actual, así que es otro punto donde se puede probar a
+// ciegas. Va en una instancia aparte para que los intentos de cambio no gasten
+// la cuota de los de login (ni al revés).
+const passwordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  limit: 8,                 // intentos por IP en la ventana
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos de cambio de contraseña. Probá de nuevo en unos minutos.' },
+});
+
 // ── Auth ──────────────────────────────────────────────────────────
 
 app.post('/api/login', loginLimiter, async (req, res, next) => {
@@ -120,6 +165,15 @@ app.post('/api/login', loginLimiter, async (req, res, next) => {
     const usuario = await usuarios.findByUsername(username);
     if (!usuario || !bcrypt.compareSync(password, usuario.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+    }
+
+    // Usuario desactivado: se avisa con un mensaje propio y no con "usuario o
+    // contraseña incorrectos", porque las credenciales están bien — el que no
+    // va es el acceso. Va después de validar la contraseña a propósito: así el
+    // mensaje no le revela a un desconocido qué usuarios existen.
+    if (usuario.activo !== true) {
+      console.log('[login] RECHAZADO usuario desactivado | user:', usuario.username);
+      return res.status(401).json({ error: 'Usuario desactivado' });
     }
 
     const token = jwt.sign(
@@ -146,15 +200,59 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-// gestiona_grilla sale de la BASE y no del JWT: así, si se le saca el permiso
-// a alguien, el link de la grilla desaparece en la siguiente carga de página y
-// no cuando se le vence el token de 8 horas. Es la misma lectura que hacen los
-// middlewares de routes/grilla.js, que son los que de verdad cortan el acceso.
-app.get('/api/me', requireAuth(), async (req, res, next) => {
+// ── Mi cuenta ─────────────────────────────────────────────────────
+
+const PASSWORD_MIN = 8;
+
+// POST /api/cuenta/password — cada usuario cambia SU propia contraseña.
+// Cualquier rol, visor incluido: es su cuenta, no un dato del negocio.
+// Pide la contraseña actual, así una sesión ajena abierta no alcanza para
+// quedarse con la cuenta. El limiter va antes de requireAuth para que un
+// bombardeo no llegue ni a consultar la base.
+app.post('/api/cuenta/password', passwordLimiter, requireAuth(), async (req, res, next) => {
   try {
-    const gestiona_grilla = await usuarios.gestionaGrilla(req.user.id);
-    res.json({ user: { ...req.user, gestiona_grilla }, alertDays: config.ALERT_DAYS });
+    const body = req.body || {};
+    // Sin trim: un espacio al principio o al final es parte de la contraseña.
+    const actual = typeof body.actual === 'string' ? body.actual : '';
+    const nueva = typeof body.nueva === 'string' ? body.nueva : '';
+    const repetir = typeof body.repetir === 'string' ? body.repetir : '';
+
+    if (!actual || !nueva || !repetir) {
+      return res.status(400).json({ error: 'Completá la contraseña actual, la nueva y la repetición' });
+    }
+    if (nueva.length < PASSWORD_MIN) {
+      return res.status(400).json({ error: `La contraseña nueva debe tener al menos ${PASSWORD_MIN} caracteres` });
+    }
+    if (nueva !== repetir) {
+      return res.status(400).json({ error: 'La contraseña nueva y su repetición no coinciden' });
+    }
+    if (nueva === actual) {
+      return res.status(400).json({ error: 'La contraseña nueva tiene que ser distinta de la actual' });
+    }
+
+    const hashActual = await usuarios.getPasswordHash(req.user.id);
+    if (!hashActual || !bcrypt.compareSync(actual, hashActual)) {
+      console.log('[cuenta] contraseña actual incorrecta | user:', req.user.username);
+      return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
+    }
+
+    const ok = await usuarios.updatePassword(req.user.id, bcrypt.hashSync(nueva, 10));
+    if (!ok) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    // El token sigue valiendo: no guarda nada de la contraseña, y cerrarle la
+    // sesión a quien acaba de cambiarla a propósito sería ruido.
+    console.log('[cuenta] contraseña cambiada | user:', req.user.username);
+    res.json({ ok: true });
   } catch (err) { next(err); }
+});
+
+// req.user ya viene entero de la base (requireAuth lo lee en cada request),
+// gestiona_grilla incluido: así, si se le saca el permiso a alguien, el link de
+// la grilla desaparece en la siguiente carga de página y no cuando se le vence
+// el token de 8 horas. Los middlewares de routes/grilla.js hacen su propia
+// lectura y son los que de verdad cortan el acceso.
+app.get('/api/me', requireAuth(), (req, res) => {
+  res.json({ user: req.user, alertDays: config.ALERT_DAYS });
 });
 
 // ── Páginas ───────────────────────────────────────────────────────
@@ -182,6 +280,9 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
 
+// Su propia cuenta la ve cualquier usuario logueado, visor incluido.
+app.get('/cuenta', requireAuth(), view('cuenta.html'));
+
 app.get('/dashboard', requireAuth(['admin', 'visor']), view('dashboard.html'));
 app.get('/inicio', requireAuth('operador'), view('inicio.html'));
 app.get('/clientes', requireAuth(), view('clientes.html'));
@@ -202,12 +303,10 @@ app.get('/pedidos/:id/editar', requireAuth(['admin', 'operador']), view('pedido-
 //
 // El permiso no se puede expresar con requireAuth(rol) porque no es un rol:
 // Admin1, que es quien edita la grilla, tiene rol 'operador'.
-async function requireVistaGrilla(req, res, next) {
-  try {
-    if (req.user.rol === 'admin' || req.user.rol === 'visor') return next();
-    if (await usuarios.gestionaGrilla(req.user.id)) return next();
-    return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
-  } catch (err) { next(err); }
+function requireVistaGrilla(req, res, next) {
+  if (req.user.rol === 'admin' || req.user.rol === 'visor') return next();
+  if (req.user.gestiona_grilla) return next();
+  return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
 }
 
 app.get('/grilla/dia', requireAuth(), requireVistaGrilla, view('grilla-dia.html'));

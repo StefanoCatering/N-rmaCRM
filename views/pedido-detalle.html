@@ -193,6 +193,8 @@
           <div class="cliente-info-value">${fmtGs(p.monto)}</div></div>
         <div class="cliente-info-item"><span class="form-label">Estado</span>
           <div class="cliente-info-value">${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : badgeEstadoPago(p.estado_pago)}</div></div>
+        <div class="cliente-info-item"><span class="form-label">Cargado por</span>
+          <div class="cliente-info-value">${p.recibido_por_username ? escapeHtml(p.recibido_por_username) : '—'}</div></div>
         ${esDeGrilla() ? `
         <div class="cliente-info-item"><span class="form-label">Ubicación de entrega</span>
           <div class="cliente-info-value">${escapeHtml([p.ubicacion_direccion, p.ubicacion_zona].filter(Boolean).join(' · ') || 'Sin especificar')}</div></div>` : ''}
@@ -223,15 +225,15 @@
       try {
         const { auditoria } = await api('/api/pedidos/' + PEDIDO_ID + '/auditoria');
         if (!auditoria.length) {
-          cont.innerHTML = '<div class="empty-state">Sin ediciones ni cancelaciones registradas.</div>';
+          cont.innerHTML = '<div class="empty-state">Sin movimientos registrados.</div>';
           return;
         }
         cont.innerHTML = auditoria.map(a => `
           <div style="padding:8px 0;border-bottom:1px solid rgba(8,43,85,0.08);font-size:11px;">
-            <span class="badge ${a.accion === 'cancelacion' ? 'badge-danger' : 'badge-info'}">${a.accion}</span>
+            <span class="badge ${a.accion === 'cancelacion' ? 'badge-danger' : 'badge-info'}">${ACCION_LABEL[a.accion] || a.accion}</span>
             <strong>${escapeHtml(a.usuario)}</strong>
             <span class="text-muted">· ${fmtFecha(a.fecha)}</span>
-            <div class="mt-8">${escapeHtml(a.motivo)}</div>
+            ${a.motivo ? `<div class="mt-8">${escapeHtml(a.motivo)}</div>` : ''}
             ${a.detalle ? `<div class="nota mt-8" style="white-space:pre-wrap;">${escapeHtml(JSON.stringify(a.detalle, null, 1))}</div>` : ''}
           </div>
         `).join('');

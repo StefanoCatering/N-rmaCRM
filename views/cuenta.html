@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · mi cuenta</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view" style="max-width:480px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">mi cuenta</div>
+          <div class="view-header-sub" id="sub-cuenta">Cambiá tu contraseña</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">cambiar contraseña</div>
+
+        <div class="nota">
+          Tu contraseña es personal: no la comparta ni la deje anotada. Si la
+          olvidás, pedile a un administrador que te la restablezca.
+        </div>
+
+        <div id="form-error" class="form-error hidden"></div>
+        <div id="form-ok" class="form-success hidden"></div>
+
+        <div class="form-group">
+          <label class="form-label">Contraseña actual</label>
+          <input type="password" id="f-actual" autocomplete="current-password" placeholder="••••••••"/>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Contraseña nueva</label>
+          <input type="password" id="f-nueva" autocomplete="new-password" placeholder="Mínimo 8 caracteres"/>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Repetir contraseña nueva</label>
+          <input type="password" id="f-repetir" autocomplete="new-password" placeholder="••••••••"/>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="btn-primary" id="btn-guardar">Guardar contraseña</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const PASSWORD_MIN = 8; // mismo mínimo que valida el servidor
+
+    const inputs = {};
+    const errorBox = document.getElementById('form-error');
+    const okBox = document.getElementById('form-ok');
+    const btn = document.getElementById('btn-guardar');
+
+    function mostrarError(msg) {
+      okBox.classList.add('hidden');
+      errorBox.textContent = msg;
+      errorBox.classList.remove('hidden');
+    }
+
+    function mostrarOk(msg) {
+      errorBox.classList.add('hidden');
+      okBox.textContent = msg;
+      okBox.classList.remove('hidden');
+    }
+
+    async function guardar() {
+      const actual = inputs.actual.value;
+      const nueva = inputs.nueva.value;
+      const repetir = inputs.repetir.value;
+
+      // Las mismas validaciones corren en el servidor (es él el que manda);
+      // acá están para no gastar un request en un error evidente.
+      if (!actual || !nueva || !repetir) {
+        return mostrarError('Completá la contraseña actual, la nueva y la repetición.');
+      }
+      if (nueva.length < PASSWORD_MIN) {
+        return mostrarError('La contraseña nueva debe tener al menos ' + PASSWORD_MIN + ' caracteres.');
+      }
+      if (nueva !== repetir) {
+        return mostrarError('La contraseña nueva y su repetición no coinciden.');
+      }
+      if (nueva === actual) {
+        return mostrarError('La contraseña nueva tiene que ser distinta de la actual.');
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Guardando...';
+      try {
+        await api('/api/cuenta/password', { method: 'POST', body: { actual, nueva, repetir } });
+        inputs.actual.value = '';
+        inputs.nueva.value = '';
+        inputs.repetir.value = '';
+        mostrarOk('Contraseña actualizada. La próxima vez que ingreses, usá la nueva.');
+      } catch (e) {
+        mostrarError(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Guardar contraseña';
+      }
+    }
+
+    (async function () {
+      const user = await ensureSession();
+      renderNav('/cuenta');
+
+      inputs.actual = document.getElementById('f-actual');
+      inputs.nueva = document.getElementById('f-nueva');
+      inputs.repetir = document.getElementById('f-repetir');
+
+      if (user) {
+        document.getElementById('sub-cuenta').textContent =
+          user.username + ' · ' + user.rol;
+      }
+
+      btn.addEventListener('click', guardar);
+      inputs.repetir.addEventListener('keydown', (e) => { if (e.key === 'Enter') guardar(); });
+    })();
+  </script>
+</body>
+</html>

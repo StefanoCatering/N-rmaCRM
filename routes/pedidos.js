@@ -247,6 +247,11 @@ router.post('/', requireEscritura, async (req, res, next) => {
       detalle_modificacion,
       ubicacion_id,
       lineas,
+      // Quién lo cargó: el id queda en pedidos.recibido_por y el username en
+      // la fila 'creacion' de pedidos_auditoria, las dos en la misma
+      // transacción que el pedido (fase 8).
+      recibido_por: req.user.id,
+      usuario: req.user.username,
     });
 
     // El pedido ya está guardado. Si el espejado hacia Narma Pedidos falla,
@@ -300,7 +305,14 @@ router.patch('/:id/pago', requireEscritura, async (req, res, next) => {
       monto_pagado = mp;
     }
 
-    const actualizado = await pedidos.updatePago(id, estado_pago, monto_pagado);
+    // updatePago hace el UPDATE y la fila 'pago' de pedidos_auditoria en una
+    // sola transacción: un cambio de estado de pago no puede quedar sin
+    // constancia de quién lo hizo (fase 8). Va sin motivo — el estado de pago
+    // lo cambia la ATC en el día a día y no es una edición que haya que
+    // justificar por escrito, a diferencia de PATCH /:id.
+    const actualizado = await pedidos.updatePago(
+      id, pedido, estado_pago, monto_pagado, req.user.username
+    );
     res.json({ pedido: actualizado });
   } catch (err) { next(err); }
 });

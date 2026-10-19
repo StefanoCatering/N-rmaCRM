@@ -50,6 +50,12 @@ const CANAL_LABEL = {
 };
 const MEDIO_PAGO_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', pos: 'POS', cortesia: 'Cortesía' };
 const ESTADO_PAGO_LABEL = { pagado: 'Pagado', pendiente: 'Pendiente', parcial: 'Parcial' };
+// Acciones de pedidos_auditoria. Las claves son los valores del CHECK de
+// pedidos_auditoria.accion: si se agrega una, va en los dos lados.
+// 'creacion' y 'pago' no llevan motivo (ver fase 8).
+const ACCION_LABEL = {
+  creacion: 'Creación', edicion: 'Edición', cancelacion: 'Cancelación', pago: 'Pago',
+};
 const TIPO_VIANDA_LABEL = { economico: 'Económico', saludable: 'Saludable', low_carb: 'Low Carb', modificacion_menu: 'Modificación de menú' };
 // Motivos de ausencia de la grilla de comedor. Las claves son los valores del
 // CHECK de grilla_celdas.ausencia: si se agrega uno, va en los dos lados.
@@ -107,6 +113,8 @@ function renderNav(activeHref) {
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor' || CURRENT_USER.gestiona_grilla) {
     links.push(['/grilla', 'Grilla']);
   }
+  // Su propia cuenta la tiene cualquier usuario logueado, visor incluido.
+  links.push(['/cuenta', 'Mi cuenta']);
 
   const linksHtml = links.map(([href, label]) => {
     const active = href === activeHref ? ' active' : '';
