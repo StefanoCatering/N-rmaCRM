@@ -1,7 +1,8 @@
 # Närma CRM — Documento de Handoff
 
 > Estado del proyecto para continuar en una nueva sesión.
-> Última actualización: 2026-10-19 · `main` en `6986b0b` (fase 8 mergeada). Todas las migraciones del repo están aplicadas.
+> Última actualización: 2026-10-19 · `main` en `faed228` (fase 8 mergeada). Todas las migraciones del repo están aplicadas.
+> **Fase 9 en la rama `fase9-resumen-dia`, sin mergear.** No agrega ninguna migración: no toca el esquema.
 
 ---
 
@@ -69,30 +70,34 @@ narma_crm/
 │   ├── usuarios.js            # findByUsername, findById, create, gestionaGrilla
 │   ├── clientes.js            # CRUD + KPIs. Los tickets excluyen pedidos origen='grilla'
 │   ├── pedidos.js             # listByCliente, getById, getConDetalle, create, listFiltered, update, cancelar, auditar
-│   ├── pedidoDetalle.js       # Líneas + excepciones + resolución de fechas (lun-vie). Helpers de fecha
+│   ├── pedidoDetalle.js       # Líneas + excepciones + resolución de fechas (lun-vie). Helpers de fecha y hoyISO() (zona Asunción)
 │   ├── platos.js              # Catálogo. etiquetaPlato() = nombre único de plato en todo el sistema
 │   ├── ubicaciones.js         # listByCliente, replaceForCliente (hasta 3), belongsToCliente
+│   ├── entregas.js            # Fase 9: líneas → entregas concretas. Lo comparten el sync y el resumen
 │   ├── syncPedidos.js         # Espejado CRM → Narma Pedidos. Nunca hace fallar el guardado
+│   ├── resumen.js             # Fase 9: resumen del día + control contra pedidos_crm_detalle (solo lectura)
 │   └── grilla.js              # Fase 7: cálculo de totales, envío semanal, hoja del día
 │
 ├── routes/
 │   ├── clientes.js            # /api/clientes/* (incluye /kpis, /alertas, /empresas)
 │   ├── pedidos.js             # /api/pedidos/* (list, create, pago, editar, cancelar, líneas, excepciones)
-│   ├── platos.js              # /api/platos (catálogo activo por categoría)
+│   ├── platos.js              # /api/platos (catálogo activo por categoría; ?incluir_general=1 trae todo)
 │   ├── grilla.js              # /api/grilla/* (fase 7)
+│   ├── resumen.js             # /api/resumen (fase 9)
 │   └── export.js              # /api/export (Excel: datos | historial | pedidos)
 │
-├── views/                     # HTML servidos por sendFile (13 vistas)
+├── views/                     # HTML servidos por sendFile (14 vistas)
 │   ├── login.html · 403.html
 │   ├── dashboard.html         # admin + visor
 │   ├── inicio.html            # operador
 │   ├── clientes.html · cliente-ficha.html · cliente-form.html
 │   ├── pedidos.html · pedido-form.html · pedido-detalle.html
 │   ├── grilla.html · grilla-dia.html     # fase 7
-│   └── cuenta.html            # fase 8 — cambio de contraseña propia (todos los roles)
+│   ├── cuenta.html            # fase 8 — cambio de contraseña propia (todos los roles)
+│   └── resumen.html           # fase 9 — resumen del día (los tres roles, solo lectura)
 │
 ├── public/
-│   ├── css/styles.css         # Estilos Närma. Incluye sección GRILLA y reglas @media print
+│   ├── css/styles.css         # Estilos Närma. Incluye secciones GRILLA y RESUMEN, y reglas @media print
 │   └── js/common.js           # api(), ensureSession(), renderNav(), labels, fmt*
 │
 ├── migrations/                # SQL que se corre A MANO en el SQL Editor de Supabase
@@ -153,7 +158,18 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 ### Platos (routes/platos.js)
 | Método | Ruta | Permiso |
 |---|---|---|
-| GET | `/api/platos` | Autenticado. Catálogo activo por categoría, con `etiqueta`. **Excluye la categoría `General`** |
+| GET | `/api/platos` | Autenticado. Catálogo activo por categoría, con `etiqueta`. **Excluye la categoría `General`** — es el catálogo "por persona" que usa la grilla |
+| GET | `/api/platos?incluir_general=1` | Autenticado. **Todo** el catálogo activo, `General` incluida. Lo piden `pedido-form.html` y `pedido-detalle.html` (fase 9) |
+
+### Resumen del día (routes/resumen.js — fase 9)
+| Método | Ruta | Permiso |
+|---|---|---|
+| GET | `/api/resumen?fecha=YYYY-MM-DD` | Autenticado (admin, operador y visor). **Solo lectura.** Sin `fecha` devuelve **mañana** en hora de Asunción, y la fecha resuelta vuelve en la respuesta junto con `hoy` |
+
+Devuelve `{ resumen: { fecha, total, cocina, fuentes, entregas }, hoy }`:
+- `total.platos[]` — una fila por plato con `crm`, `cocina` y `diferencia`, cada uno `{ Narma, Venezia, total }`, más `total.totales` y `total.coincide`.
+- `cocina` — `{ disponible, motivo }`. Si no se puede leer `pedidos_crm_detalle`, el resto del resumen se devuelve igual y la pantalla avisa que no está verificado.
+- `fuentes[]` — un bloque por fuente (`Grilla · <empresa>`, la empresa del cliente, o `Particulares`) con su total por plato y el detalle por cliente.
 
 ### Grilla de comedor (routes/grilla.js — fase 7)
 | Método | Ruta | Permiso |
@@ -170,7 +186,7 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 `GET /api/export?tipo=datos|historial|pedidos` — autenticado. **Excluye los pedidos `origen='grilla'`** de las hojas y de los promedios/totales de monto.
 
 ### Páginas (server.js)
-`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/cuenta` (cualquier usuario logueado), `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
+`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/cuenta` (cualquier usuario logueado), `/resumen` (cualquier usuario logueado — fase 9), `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
 
 ---
 
@@ -187,6 +203,7 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 - Auth por JWT (8 h) en cookie `narma_token` (`httpOnly, secure, sameSite:lax`). El token solo dice **quién** es: `activo` y `rol` se leen de la base en cada request (fase 8).
 - **`usuarios.activo = false`** corta el acceso en el acto: el login responde 401 `Usuario desactivado`, y un request con un token todavía vigente queda sin cookie y afuera. Se desactiva, no se borra: el id está referenciado por `pedidos.recibido_por`/`verificado_por` y `grilla_celdas.updated_by`.
 - **Cada usuario cambia su propia contraseña** en `/cuenta` (visor incluido): pide la actual, exige 8 caracteres como mínimo y guarda un hash bcrypt. Nadie cambia la de otro desde la app.
+- **El resumen del día (`/resumen`) lo ven los tres roles**, visor incluido: es solo lectura y no hay nada que escribir ahí. No tiene un permiso propio — es la misma información de producción que ya se ve en pedidos y en la grilla.
 
 **Usuarios en producción:** `Admin1` (operador, `gestiona_grilla` tras correr la fase 7), `Admin2` (operador), `Guadalupe` (admin), `Stefano` (admin), `Direccion` (visor).
 `seed.js` usa los mismos usernames con contraseñas ficticias — **no correrlo contra producción**.
@@ -249,6 +266,9 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 | Grilla: totales por plato/día calculados en el servidor y envío como pedido semanal | ✅ (fase 7) |
 | Grilla: hoja del día imprimible | ✅ (fase 7) |
 | Auditoría de creación y de cambio de pago, `recibido_por` en el detalle del pedido, usuarios desactivables, cambio de contraseña propia | ✅ (fase 8) |
+| Categoría `General` habilitada en los pedidos normales, para cualquier cliente | ✅ (fase 9) |
+| Resumen del día: total por plato y envase, control contra lo que recibió cocina, desglose por fuente | ✅ (fase 9) |
+| Envase visible en el listado de pedidos y en la opción "según el cliente" del selector | ✅ (fase 9) |
 | Facturación del comedor, control de retiro, importación de la planilla del banco | ❌ Fuera de alcance de la fase 7 |
 | App de colaboradores | ❌ No existe |
 
@@ -256,22 +276,24 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 
 ## 9. Bugs conocidos / deuda técnica
 
-1. **`listFiltered` no devuelve `monto_pagado`** → el modal "Editar pago" en `pedidos.html` arranca con el campo vacío al editar un pedido parcial. El backend lo exige igual, así que es solo UX.
-2. **Export `tipo=pedidos` ignora los filtros nuevos** de la vista (`estado_pago`, `tipo_vianda`, `segmento`, `canal_origen`). Solo respeta `cliente_id`, fechas y `estado` del cliente.
-3. **Los `<script>` inline de las 12 vistas** obligan a `script-src 'unsafe-inline'` en la CSP (ver sección 11). Sacarlos es un refactor grande.
-4. **`grilla_empresas` se carga a mano.** No hay UI para vincular una empresa con su cliente cuenta-empresa; hoy es un INSERT en el SQL Editor. Sin esa fila la grilla no muestra ninguna empresa.
-5. **La grilla no tiene vista de auditoría.** Todo queda en `grilla_auditoria`, pero solo se consulta por SQL. `pedido-detalle.html` de un pedido de grilla muestra "sin auditoría" porque su historial vive en la otra tabla.
-6. **La semana por defecto de `/grilla` es la del lunes de hoy.** Un sábado o domingo eso cae en la semana que ya terminó y queda todo en solo lectura; hay que apretar "Semana siguiente". El aviso del jueves mitiga el caso real.
-7. **Al desactivar un plato del catálogo** las celdas y planes que lo usaban siguen apuntándolo. Se muestra bien (la etiqueta se resuelve igual) pero no se puede volver a elegir.
+1. **Export `tipo=pedidos` ignora los filtros nuevos** de la vista (`estado_pago`, `tipo_vianda`, `segmento`, `canal_origen`). Solo respeta `cliente_id`, fechas y `estado` del cliente.
+2. **Los `<script>` inline de las 14 vistas** obligan a `script-src 'unsafe-inline'` en la CSP (ver sección 11). Sacarlos es un refactor grande.
+3. **`grilla_empresas` se carga a mano.** No hay UI para vincular una empresa con su cliente cuenta-empresa; hoy es un INSERT en el SQL Editor. Sin esa fila la grilla no muestra ninguna empresa.
+4. **La grilla no tiene vista de auditoría.** Todo queda en `grilla_auditoria`, pero solo se consulta por SQL. `pedido-detalle.html` de un pedido de grilla muestra "sin auditoría" porque su historial vive en la otra tabla.
+5. **La semana por defecto de `/grilla` es la del lunes de hoy.** Un sábado o domingo eso cae en la semana que ya terminó y queda todo en solo lectura; hay que apretar "Semana siguiente". El aviso del jueves mitiga el caso real.
+6. **Al desactivar un plato del catálogo** las celdas y planes que lo usaban siguen apuntándolo. Se muestra bien (la etiqueta se resuelve igual) pero no se puede volver a elegir.
+7. **El resumen del día no distingue "cocina no recibió nada" de "cocina está caída"** salvo por el aviso: si `pedidos_crm_detalle` responde pero está vacío, el control marca todo en diferencia (que es lo correcto), y si la base no responde, avisa que no se pudo verificar.
 
 ### Resueltos desde el handoff anterior
 `requireAdmin` muerto en `routes/pedidos.js` (ahora se usa), datos legacy de `monto_pagado` (migración corrida), `seed.js` desalineado (corregido), tabla `session` huérfana (dropeada en fase 4).
+
+El handoff anterior listaba como bug que **`listFiltered` no devolvía `monto_pagado`**: la query sí lo trae y el modal de pago lo usa. Era una entrada vieja, no un pendiente — se sacó de la lista junto con el ítem equivalente del backlog.
 
 ---
 
 ## 10. Próximos sprints (backlog sugerido — no comprometido)
 
-- **Terminar de vincular los comedores en `grilla_empresas`** (estado al 2026-10-19): `UENO BANK` vinculada y activa, `Kaitel` vinculada pero con `activa = false`, e `Itti SAE` todavía sin fila. Se cargan con un INSERT manual (el ejemplo está comentado al final de la sección 2 de la migración de la fase 7).
+- ~~Terminar de vincular los comedores en `grilla_empresas`~~ — **no es un pendiente.** Estado al 2026-10-19: `UENO BANK` vinculada y activa es **la única empresa que pide por grilla**. `Kaitel` está vinculada con `activa = false` e `Itti SAE` no tiene fila **a propósito**: esas dos piden por mensaje y Administración las carga como **pedidos normales** de cada colaborador, no por la grilla. Si alguna vez pasaran a comedor, se activa (o se inserta) la fila a mano.
 - UI de administración de usuarios: hoy `usuarios.activo` y el reseteo de contraseña ajena se tocan por SQL. El usuario cambia la propia desde `/cuenta`.
 - Completar `recibido_por` en el pedido semanal de la grilla (hoy queda NULL y el detalle muestra "—").
 - Facturación del comedor: hoy el pedido semanal nace con `monto = 0` a propósito.
@@ -279,7 +301,7 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 - UI para administrar `grilla_empresas` en lugar de SQL a mano.
 - Vista de auditoría de la grilla (hoy solo por SQL).
 - Ampliar `exportarPedidos` para respetar todos los filtros de `pedidos.html`.
-- Devolver `monto_pagado` en `listFiltered`.
+- Sumar el resumen del día al export (hoy solo se ve en pantalla) y, si hiciera falta, una versión imprimible como la hoja del día de la grilla.
 - Vista/gestión de usuarios y del permiso `gestiona_grilla` desde la UI (hoy solo por SQL).
 - Mover los `<script>` inline a `public/js/` para poder sacar `'unsafe-inline'` de `script-src`.
 
@@ -323,6 +345,19 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 - **La auditoría de la grilla NO pide motivo** (a diferencia de `pedidos_auditoria`): la grilla se toca decenas de veces por semana y un modal de motivo por celda la volvería inusable. Se registra sola en `grilla_auditoria`.
 - **Toda escritura de una semana ya enviada dispara el reenvío automático** de esa semana. Si la semana todavía no se envió, el cambio solo se guarda.
 
+### Fase 9 — resumen del día y categoría General en pedidos normales
+
+- **El resumen tiene que dar EXACTAMENTE lo mismo que el sync.** Para eso la resolución de entregas se extrajo a **`models/entregas.js`**, que usan los dos: `expandir()` corre `detalle.resolverEntregas()` (expansión de recurrentes + excepciones) y `armarFila()` fija las dos reglas que no se pueden duplicar — el **override de envase de la línea gana** sobre el del cliente, y el plato se nombra con **`platos.etiquetaPlato`** vía `nombresPorId`. `models/syncPedidos.js` y `models/resumen.js` no tienen su propia copia de nada de eso.
+- **El filtro por fecha se aplica DESPUÉS de expandir.** `expandir({ soloFecha })` recorre el rango completo de la línea igual que el sync y recién ahí se queda con el día pedido. Expandir solo ese día sería más barato, pero abriría la puerta a que el resumen y el sync difieran por el techo de `MAX_DIAS_RANGO` o por el salteo de fines de semana.
+- **Tres consultas por día, nunca una por pedido**: las líneas candidatas (puntual de esa fecha, o recurrente con la fecha dentro del rango), las excepciones **de esa fecha** para esas líneas (una excepción de otro día no puede cambiar lo que se entrega en esta), y los nombres de plato. El lado de cocina es **un** SELECT agrupado.
+- **Todo es `SELECT` suelto, sin transacción ni locks**: el pooler está en modo transacción (ver sección 2) y esta pantalla no tiene nada que serializar.
+- **Si la base de cocina no responde, el resumen se muestra igual** con `cocina.disponible = false` y el motivo. Mismo criterio que el sync: una caída de Narma Pedidos no puede dejar a Administración sin su hoja de control.
+- **Las filas que solo existen del lado de cocina también entran al control** (aparecen con el CRM en 0 y la diferencia en positivo): una fila que quedó viva allá y que el CRM ya no pide es justamente el descuadre que hay que ver.
+- **La fuente de una entrega** sale de `resumen.fuenteDe()`: `origen = 'grilla'` → `Grilla · <empresa>`; `segmento = 'empresa'` → la empresa del cliente (así cada heladera, AYMAC y Matrix quedan en su propio bloque); el resto → `Particulares` (particular y embajador juntos).
+- **"Mañana" se calcula en `America/Asuncion`.** `hoyISO()` se movió de `models/grilla.js` a **`models/pedidoDetalle.js`** (donde ya vivía el resto de la aritmética de fechas) y grilla lo reexporta: la grilla y el resumen tienen que estar de acuerdo en qué día es hoy. La fecha resuelta vuelve en la respuesta para que la vista no use el reloj del navegador.
+- **La categoría `General` ya entra en los pedidos normales** (Matrix los pide así). Lo que **sigue** sin aceptarla es la grilla por persona: `routes/grilla.js` usa `platos.idsActivos` para el **plato base** y para las **celdas**, mientras que `routes/pedidos.js` (líneas y excepciones) y el **pedido general** usan `idsActivosTodos`. Dos validaciones y dos catálogos, con el mismo criterio en los dos lados: `GET /api/platos` sin parámetros sigue siendo el catálogo "por persona" que pide `grilla.html`, y `?incluir_general=1` el completo.
+- **El listado de pedidos muestra el envase efectivo** (`pedidos.envaseEfectivo`): el del cliente, el override si todas las líneas lo pisan, o **"Mixto"** si conviven los dos. Sale de una sola consulta agregada sobre `pedido_detalle` para toda la página, no una por pedido.
+
 ---
 
 ## 12. Cómo arrancar el servidor localmente
@@ -351,3 +386,8 @@ No hay tests en el repo y la base de dev es la de prod, así que lo que se usó 
 - Montar **dos bases**: `crm_test` (aplicarle `supabase/schema.sql` + las migraciones en orden) y `pedidos_test` con `pedidos_crm_detalle` según el contrato de `models/syncPedidos.js`. Así se puede verificar qué filas vería cocina de verdad.
 - **El entorno de prueba es un Postgres directo, sin pooler.** Todo lo que falle solo detrás de PgBouncer en modo transacción (ver la advertencia de la sección 2) es invisible acá. Para eso la suite incluye una guarda estática que revisa el código fuente: ningún archivo de `models/` ni `routes/` puede contener `pg_advisory_lock(` o `pg_advisory_unlock`.
 - Para QA visual por navegador sobre HTTP plano hay que sacar `upgrade-insecure-requests` de la CSP **en el arnés de prueba**, nunca en `server.js`.
+
+**Cómo se verificó la fase 9** (la receta de arriba, más dos cosas que no necesitan base de prueba):
+1. **Contra producción, solo con SELECT**: se armó el resumen del 26/10/2026 con `models/resumen.js` y se comparó, clave por clave, contra lo que resuelve `syncPedidos.resolverFilas()` pedido por pedido, y contra el agrupado de `pedidos_crm_detalle` de la base de cocina. Los tres lados dieron lo mismo (182 viandas: 167 Narma + 15 Venezia).
+2. **Contra el Postgres descartable**, con los casos que producción todavía no tiene: líneas recurrentes con excepciones (otro plato, otra cantidad, `omitir`), fin de semana, pedidos y líneas canceladas, override de envase, ítems de `General` en un pedido normal. Se corrió el sync de verdad contra `pedidos_test` y después se comprobó que el control del resumen dice "coincide"; recién entonces se alteró a mano una fila **de la base de prueba** para ver que el descuadre se detecte.
+3. **QA visual con un arnés que stubbea `/api/me` y `/api/resumen`**: así se ven los cuatro estados de la pantalla (coincide, descuadre, cocina ilegible, día vacío) sin autenticarse contra producción.
