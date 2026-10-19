@@ -1,7 +1,7 @@
 # Närma CRM — Documento de Handoff
 
 > Estado del proyecto para continuar en una nueva sesión.
-> Última actualización: 2026-10-17 · Rama `fase7-grilla-comedor` (sin mergear) sobre `main` en `6c939de`.
+> Última actualización: 2026-10-19 · `main` en `6986b0b` (fase 8 mergeada). Todas las migraciones del repo están aplicadas.
 
 ---
 
@@ -100,8 +100,8 @@ narma_crm/
 │   ├── fase4_drop_legacy_tables.sql    ✅ aplicada
 │   ├── fase5_indices.sql               ✅ aplicada
 │   ├── fase6_pedidos_estructurados.sql ✅ aplicada
-│   ├── fase7_grilla_comedor.sql        ⏳ PENDIENTE
-│   └── fase8_auditoria_usuarios.sql    ⏳ PENDIENTE
+│   ├── fase7_grilla_comedor.sql        ✅ aplicada
+│   └── fase8_auditoria_usuarios.sql    ✅ aplicada
 │
 └── supabase/                  # Schema histórico (schema.sql es la base original)
 ```
@@ -220,7 +220,7 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 - **`pedido_detalle_excepciones`**: pisa una fecha de una línea recurrente. UNIQUE `(pedido_detalle_id, fecha)`.
 - **`sync_errores`**: bitácora local de syncs fallidos, con payload reenviable. Sin FK a propósito.
 
-#### Fase 7 (pendiente de correr)
+#### Fase 7
 - **`grilla_empresas`**: `empresa` PK (= `clientes.empresa`) · `cliente_pedido_id` FK (cliente "cuenta empresa", dueño del pedido semanal) · `ubicacion_id` FK · `activa`.
 - **`grilla_planes`**: `cliente_id` PK FK · `plato_base_id` FK · `observacion` · `fecha_alta` · `fecha_baja` (**exclusiva**: primer día que ya NO come).
 - **`grilla_celdas`**: una diferencia por (`cliente_id`, `fecha`) UNIQUE. CHECK `num_nonnulls(plato_id, ausencia) = 1`. `ausencia` IN (`home_office`,`vacaciones`,`reposo`,`licencia`,`otro`). **Sin fila = plato base.**
@@ -245,10 +245,10 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 | Hardening: helmet + CSP, rate limit, índices | ✅ (fase 5) |
 | Pedidos estructurados: catálogo de platos, líneas puntuales/recurrentes, excepciones por fecha | ✅ (fase 6) |
 | Sync CRM → Narma Pedidos (auto-reparador, nunca bloquea el guardado, bitácora de errores) | ✅ (fase 6) |
-| Grilla semanal de comedor: planes, celdas, rangos, día sin servicio, pedido general | ✅ (fase 7, sin mergear) |
+| Grilla semanal de comedor: planes, celdas, rangos, día sin servicio, pedido general | ✅ (fase 7) |
 | Grilla: totales por plato/día calculados en el servidor y envío como pedido semanal | ✅ (fase 7) |
 | Grilla: hoja del día imprimible | ✅ (fase 7) |
-| Auditoría de creación y de cambio de pago, `recibido_por` en el detalle del pedido, usuarios desactivables, cambio de contraseña propia | ✅ (fase 8, sin mergear) |
+| Auditoría de creación y de cambio de pago, `recibido_por` en el detalle del pedido, usuarios desactivables, cambio de contraseña propia | ✅ (fase 8) |
 | Facturación del comedor, control de retiro, importación de la planilla del banco | ❌ Fuera de alcance de la fase 7 |
 | App de colaboradores | ❌ No existe |
 
@@ -271,8 +271,7 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 
 ## 10. Próximos sprints (backlog sugerido — no comprometido)
 
-- **Correr `migrations/fase7_grilla_comedor.sql`** y crear/vincular los clientes cuenta-empresa de UENO BANK, Kaitel e Itti SAE.
-- **Correr `migrations/fase8_auditoria_usuarios.sql`**. Sin ella, la creación de pedidos falla: el INSERT de auditoría no pasa el CHECK viejo de `accion` y la transacción se cae entera.
+- **Terminar de vincular los comedores en `grilla_empresas`** (estado al 2026-10-19): `UENO BANK` vinculada y activa, `Kaitel` vinculada pero con `activa = false`, e `Itti SAE` todavía sin fila. Se cargan con un INSERT manual (el ejemplo está comentado al final de la sección 2 de la migración de la fase 7).
 - UI de administración de usuarios: hoy `usuarios.activo` y el reseteo de contraseña ajena se tocan por SQL. El usuario cambia la propia desde `/cuenta`.
 - Completar `recibido_por` en el pedido semanal de la grilla (hoy queda NULL y el detalle muestra "—").
 - Facturación del comedor: hoy el pedido semanal nace con `monto = 0` a propósito.
