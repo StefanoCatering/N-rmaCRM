@@ -25,18 +25,12 @@ const AUSENCIAS = ['home_office', 'vacaciones', 'reposo', 'licencia', 'otro'];
 // (no por id) para no clavar un id de producción en el código.
 const PLATO_ESTANDAR = 'Estándar';
 
-// Paraguay es UTC-3 y Vercel corre en UTC: con new Date() a secas, a partir de
-// las 21:00 de Asunción el servidor ya estaría en el día siguiente y dejaría
-// el día en curso en solo lectura antes de tiempo. Todas las reglas de "hoy"
-// (días pasados = solo lectura, aviso del jueves) salen de acá.
-const ZONA_HORARIA = 'America/Asuncion';
-const FORMATO_ISO = new Intl.DateTimeFormat('en-CA', {
-  timeZone: ZONA_HORARIA, year: 'numeric', month: '2-digit', day: '2-digit',
-});
-
-function hoyISO() {
-  return FORMATO_ISO.format(new Date());
-}
+// Todas las reglas de "hoy" (días pasados = solo lectura, aviso del jueves)
+// salen de acá. El reloj en sí vive en models/pedidoDetalle.js, junto al resto
+// de la aritmética de fechas: la grilla y el resumen del día tienen que estar
+// de acuerdo en qué día es hoy en Asunción.
+const ZONA_HORARIA = detalle.ZONA_HORARIA;
+const hoyISO = detalle.hoyISO;
 
 // ── Fechas ───────────────────────────────────────────────────────
 // Mismo criterio que models/pedidoDetalle.js: todo es string 'YYYY-MM-DD' y la

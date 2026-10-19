@@ -52,6 +52,7 @@
 const pool = require('./db');
 const { pool: pedidosPool, habilitado } = require('./dbPedidos');
 const detalle = require('./pedidoDetalle');
+const entregas = require('./entregas');
 const platos = require('./platos');
 
 // Filas por statement en el upsert multi-fila. 12 columnas × 500 = 6000
@@ -84,59 +85,38 @@ async function leerPedido(pedidoId) {
 // Devuelve { filas, lineasCanceladas }:
 //   filas             → entregas vigentes, para upsertear con cancelado = false
 //   lineasCanceladas  → ids de líneas cuyas filas hay que marcar canceladas
+//
+// La resolución en sí (expansión de recurrentes con sus excepciones, envase
+// efectivo, etiqueta del plato) vive en models/entregas.js, compartida con el
+// Resumen del día: lo que muestra el resumen tiene que ser exactamente lo que
+// se le manda a cocina desde acá.
 async function resolverFilas(pedidoId) {
   const pedido = await leerPedido(pedidoId);
   if (!pedido) return null;
 
   const lineas = await detalle.listByPedido(pedidoId);
-  const excepcionesPorLinea = await detalle.excepcionesPorLinea(pedidoId);
-
-  const filas = [];
-  const lineasCanceladas = [];
 
   // Si el pedido está cancelado, TODAS sus líneas se cancelan del lado de
-  // Pedidos, sin importar el estado individual de cada línea.
+  // Pedidos, sin importar el estado individual de cada línea. (El resumen no
+  // necesita este caso: descarta los pedidos cancelados en la consulta.)
   if (pedido.pedido_cancelado) {
     return { pedido, filas: [], lineasCanceladas: lineas.map(l => l.id) };
   }
 
+  const excepcionesPorLinea = await detalle.excepcionesPorLinea(pedidoId);
+
   // Nombres de plato de todos los platos involucrados, incluidos los que
   // entran por una excepción. Una sola consulta para todo el pedido.
-  const idsPlatos = new Set();
-  for (const l of lineas) {
-    idsPlatos.add(l.plato_id);
-    for (const e of excepcionesPorLinea.get(l.id) || []) {
-      if (e.plato_id != null) idsPlatos.add(e.plato_id);
-    }
-  }
-  const nombres = await platos.nombresPorId([...idsPlatos]);
+  const nombres = await platos.nombresPorId(entregas.idsDePlatos(lineas, excepcionesPorLinea));
 
-  for (const linea of lineas) {
-    if (linea.cancelado) {
-      lineasCanceladas.push(linea.id);
-      continue;
-    }
-
-    const entregas = detalle.resolverEntregas(linea, excepcionesPorLinea.get(linea.id) || []);
-    for (const e of entregas) {
-      filas.push({
-        crm_pedido_id: pedido.pedido_id,
-        crm_pedido_detalle_id: linea.id,
-        crm_excepcion_id: e.excepcion_id,
-        cliente_nombre: pedido.cliente_nombre,
-        // Se manda el valor crudo de la base ('particular'/'empresa'/'embajador').
-        // La etiqueta "Corporativo" es solo de la UI del CRM.
-        segmento: pedido.segmento,
-        // El override de la línea gana sobre el envase del cliente.
-        tipo_envase: linea.tipo_envase_override || pedido.cliente_tipo_envase,
-        plato_nombre: nombres.get(e.plato_id) || null,
-        cantidad: e.cantidad,
-        fecha_entrega: e.fecha_entrega,
-        ubicacion_direccion: pedido.ubicacion_direccion,
-        comentario: e.comentario,
-      });
-    }
-  }
+  const { filas, lineasCanceladas } = entregas.expandir({
+    lineas,
+    // La clave es pedido_id tal como lo devuelve la base, para que coincida
+    // con linea.pedido_id sin depender del tipo que llegó por parámetro.
+    pedidosPorId: new Map([[pedido.pedido_id, pedido]]),
+    excepcionesPorLinea,
+    nombres,
+  });
 
   return { pedido, filas, lineasCanceladas };
 }

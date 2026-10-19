@@ -410,3 +410,56 @@ input:focus, select:focus, textarea:focus { border-color: var(--orange); backgro
   .card { border: none; box-shadow: none; padding: 0 0 10px; margin-bottom: 10px; break-inside: avoid; }
   .hoja-grupo { break-inside: avoid; }
 }
+
+/* ══════════════════════════════════════════════════════
+   RESUMEN DEL DÍA (fase 9)
+   Hoja de SOLO LECTURA con la que Administración controla, la noche
+   anterior, que lo cargado en el CRM cuadre con lo que va a producir
+   cocina. Lo que tiene que salir a la vista es el descuadre: la columna
+   del CRM se lee normal y debajo, solo cuando no coincide, aparece lo que
+   cocina recibió de verdad con la diferencia.
+   ══════════════════════════════════════════════════════ */
+.resumen-num      { text-align: right; font-variant-numeric: tabular-nums; }
+.resumen-num-cero { color: var(--text3); font-weight: 400; }
+.resumen-fila-total td { background: var(--beige); font-weight: 600; }
+
+/* Fila de un plato que no coincide con cocina */
+.resumen-fila-dif td { background: #FFF0EC; }
+.resumen-fila-dif:hover td { background: #FFE6DF; }
+
+/* "cocina: 8 (−2)" debajo del número del CRM */
+.resumen-cocina {
+  display: block; font-size: 9px; font-weight: 600; color: var(--orange);
+  margin-top: 2px; white-space: nowrap;
+}
+
+/* Aviso verde de que todo cuadra */
+.resumen-ok {
+  display: flex; align-items: center; gap: 10px;
+  background: #E8F5F1; border: 1px solid rgba(0,121,94,0.25);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px;
+  font-size: 11px; color: var(--green); font-weight: 600;
+}
+
+/* Aviso de que no se pudo leer la base de cocina: el resto del resumen
+   sigue sirviendo, así que el tono es de advertencia y no de error. */
+.resumen-sin-cocina {
+  background: #FEF5E4; border: 1px solid rgba(245,167,45,0.35);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px;
+  font-size: 11px; color: var(--navy); font-weight: 500;
+}
+
+/* Bloque por fuente del desglose */
+.resumen-fuente-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-bottom: 8px;
+}
+.resumen-fuente-nombre { font-size: 12px; font-weight: 600; color: var(--navy); }
+.resumen-fuente-total  { font-size: 10px; color: var(--text3); }
+.resumen-detalle > summary {
+  cursor: pointer; font-size: 10px; color: var(--navy2); font-weight: 600;
+  padding: 7px 0 3px; list-style: none;
+}
+.resumen-detalle > summary::marker { content: ''; }
+.resumen-detalle > summary::before { content: '▸ '; }
+.resumen-detalle[open] > summary::before { content: '▾ '; }
