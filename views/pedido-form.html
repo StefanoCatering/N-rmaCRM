@@ -153,6 +153,7 @@
         document.getElementById('f-cliente-id').value = '';
         document.getElementById('cliente-seleccionado').classList.add('hidden');
         actualizarOpcionCortesia();
+        actualizarEtiquetasEnvase();
         clearTimeout(timerBuscar);
         const q = inputBuscar.value.trim();
         if (!q) { document.getElementById('cliente-resultados').classList.add('hidden'); return; }
@@ -170,7 +171,10 @@
       // Catálogo de platos: se arma con lo que haya en la tabla platos, así que
       // un alta hecha directo en la base aparece acá sin tocar el código.
       try {
-        const { categorias } = await api('/api/platos');
+        // incluir_general=1: un pedido normal acepta todo el catálogo activo,
+        // los ítems generales incluidos (sopa, ensalada mixta, jugo,
+        // vinagreta). Lo que sigue sin aceptarlos es la grilla de comedor.
+        const { categorias } = await api('/api/platos?incluir_general=1');
         CATALOGO_PLATOS = categorias;
       } catch (e) {
         const box = document.getElementById('form-error');
@@ -230,6 +234,24 @@
       cont.classList.remove('hidden');
     }
 
+    // Texto de la opción vacía del selector de envase. Dejar la línea "según
+    // el cliente" es lo normal, pero sin decir cuál es el envase del cliente
+    // la opción no informa nada: quien carga el pedido tiene que saber qué va
+    // a salir si no toca nada.
+    function etiquetaEnvaseCliente() {
+      const envase = clienteSeleccionado && clienteSeleccionado.tipo_envase;
+      return envase ? `— Según el cliente (${envase}) —` : '— Según el cliente —';
+    }
+
+    // Se llama al cambiar de cliente: las líneas ya cargadas también tienen
+    // que decir el envase del cliente nuevo.
+    function actualizarEtiquetasEnvase() {
+      const texto = etiquetaEnvaseCliente();
+      document.querySelectorAll('#lineas .l-envase option[value=""]').forEach(opt => {
+        opt.textContent = texto;
+      });
+    }
+
     function opcionesPlatos() {
       return CATALOGO_PLATOS.map(c => `
         <optgroup label="${escapeHtml(c.categoria)}">
@@ -265,7 +287,7 @@
           <div class="form-group">
             <label class="form-label">Envase</label>
             <select class="l-envase">
-              <option value="">— Según el cliente —</option>
+              <option value="">${escapeHtml(etiquetaEnvaseCliente())}</option>
               <option value="Narma">Narma</option>
               <option value="Venezia">Venezia</option>
             </select>
@@ -355,6 +377,7 @@
       sel.textContent = `Cliente seleccionado: ${cliente.nombre_completo} (${cliente.cedula})`;
       sel.classList.remove('hidden');
       actualizarOpcionCortesia();
+      actualizarEtiquetasEnvase();
     }
 
     async function guardar() {

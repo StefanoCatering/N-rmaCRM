@@ -91,7 +91,9 @@
       renderNav('/pedidos');
 
       try {
-        const { categorias } = await api('/api/platos');
+        // incluir_general=1: desde la fase 9 los pedidos normales aceptan todo
+        // el catálogo activo, los ítems generales incluidos (sopa, jugo).
+        const { categorias } = await api('/api/platos?incluir_general=1');
         CATALOGO_PLATOS = categorias;
       } catch (e) { mostrarError('No se pudo cargar el catálogo de platos: ' + e.message); }
 
@@ -175,6 +177,14 @@
         + '. '
         + `<a href="/grilla?lunes=${encodeURIComponent(semana)}"><strong>Ir a la grilla →</strong></a>`;
       box.classList.remove('hidden');
+    }
+
+    // Texto de la opción vacía del selector de envase de una línea. Sin decir
+    // cuál es el envase del cliente, "según el cliente" no informa nada: quien
+    // edita la línea tiene que saber qué va a salir si no toca nada.
+    function etiquetaEnvaseCliente() {
+      const envase = PEDIDO && PEDIDO.cliente_tipo_envase;
+      return envase ? `— Según el cliente (${envase}) —` : '— Según el cliente —';
     }
 
     function renderInfo() {
@@ -412,7 +422,7 @@
           <div class="form-group">
             <label class="form-label">Envase</label>
             <select class="ed-envase">
-              <option value="">— Según el cliente —</option>
+              <option value="">${escapeHtml(etiquetaEnvaseCliente())}</option>
               <option value="Narma"${l.tipo_envase_override === 'Narma' ? ' selected' : ''}>Narma</option>
               <option value="Venezia"${l.tipo_envase_override === 'Venezia' ? ' selected' : ''}>Venezia</option>
             </select>
@@ -524,7 +534,7 @@
           <div class="form-group">
             <label class="form-label">Envase</label>
             <select class="n-envase">
-              <option value="">— Según el cliente —</option>
+              <option value="">${escapeHtml(etiquetaEnvaseCliente())}</option>
               <option value="Narma">Narma</option>
               <option value="Venezia">Venezia</option>
             </select>
