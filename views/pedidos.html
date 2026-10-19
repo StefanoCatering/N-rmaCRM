@@ -405,7 +405,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Cliente</th><th>Segmento</th><th>Fecha pedido</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${puedeEditarPedido ? '<th>Acciones</th>' : ''}</tr>
+                <tr><th>Cliente</th><th>Segmento</th><th>Envase</th><th>Fecha pedido</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${puedeEditarPedido ? '<th>Acciones</th>' : ''}</tr>
               </thead>
               <tbody>
                 ${pedidos.map(p => {
@@ -418,6 +418,11 @@
                     <td style="white-space:normal;min-width:160px;"><strong>${escapeHtml(p.nombre_completo)}</strong>
                       ${deGrilla ? '<span class="badge badge-info" style="margin-left:6px;">Grilla</span>' : ''}</td>
                     <td>${SEGMENTO_LABEL[p.segmento]}</td>
+                    <!-- Envase del cliente, o "Mixto" si alguna línea lo pisa
+                         con otro distinto (el detalle lo muestra línea por línea). -->
+                    <td>${p.tipo_envase_efectivo === 'Mixto'
+                      ? '<span class="badge badge-warning">Mixto</span>'
+                      : escapeHtml(p.tipo_envase_efectivo || '—')}</td>
                     <td>${fmtFecha(p.fecha_pedido)}</td>
                     <td><strong>${deGrilla ? '<span class="text-muted">—</span>' : fmtGs(p.monto)}</strong></td>
                     <td style="white-space:nowrap;">
