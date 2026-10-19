@@ -38,7 +38,9 @@ function esDeGrilla(pedido) {
   return pedido && pedido.origen === 'grilla';
 }
 
-// Solo admin puede editar/cancelar pedidos
+// Queda para lo que sigue siendo exclusivo del admin: hoy, la bitácora de
+// syncs fallidos. Editar y cancelar pedidos ya no pasa por acá — lo hace
+// cualquiera que no sea visor, con motivo obligatorio y auditoría.
 function requireAdmin(req, res, next) {
   if (req.user.rol !== 'admin') return res.status(403).json({ error: 'No autorizado' });
   next();
@@ -247,6 +249,11 @@ router.post('/', requireEscritura, async (req, res, next) => {
       detalle_modificacion,
       ubicacion_id,
       lineas,
+      // Quién lo cargó: el id queda en pedidos.recibido_por y el username en
+      // la fila 'creacion' de pedidos_auditoria, las dos en la misma
+      // transacción que el pedido (fase 8).
+      recibido_por: req.user.id,
+      usuario: req.user.username,
     });
 
     // El pedido ya está guardado. Si el espejado hacia Narma Pedidos falla,
@@ -300,13 +307,22 @@ router.patch('/:id/pago', requireEscritura, async (req, res, next) => {
       monto_pagado = mp;
     }
 
-    const actualizado = await pedidos.updatePago(id, estado_pago, monto_pagado);
+    // updatePago hace el UPDATE y la fila 'pago' de pedidos_auditoria en una
+    // sola transacción: un cambio de estado de pago no puede quedar sin
+    // constancia de quién lo hizo (fase 8). Va sin motivo — el estado de pago
+    // lo cambia la ATC en el día a día y no es una edición que haya que
+    // justificar por escrito, a diferencia de PATCH /:id.
+    const actualizado = await pedidos.updatePago(
+      id, pedido, estado_pago, monto_pagado, req.user.username
+    );
     res.json({ pedido: actualizado });
   } catch (err) { next(err); }
 });
 
-// PATCH /api/pedidos/:id — editar campos clave de un pedido (solo admin, con motivo obligatorio)
-router.patch('/:id', requireAdmin, async (req, res, next) => {
+// PATCH /api/pedidos/:id — editar campos clave de un pedido (admin y operador; visor no puede).
+// El motivo sigue siendo obligatorio y la edición sigue quedando en pedidos_auditoria:
+// lo que cambió es quién puede hacerla, no que haya que justificarla.
+router.patch('/:id', requireEscritura, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const pedido = id ? await pedidos.getById(id) : null;
@@ -368,8 +384,9 @@ router.patch('/:id', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PATCH /api/pedidos/:id/cancelar — cancelar un pedido (solo admin, con motivo obligatorio)
-router.patch('/:id/cancelar', requireAdmin, async (req, res, next) => {
+// PATCH /api/pedidos/:id/cancelar — cancelar un pedido (admin y operador; visor no puede),
+// con motivo obligatorio.
+router.patch('/:id/cancelar', requireEscritura, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const pedido = id ? await pedidos.getById(id) : null;
@@ -401,7 +418,7 @@ router.get('/:id/auditoria', async (req, res, next) => {
 // ── Líneas de pedido ──────────────────────────────────────────────
 // Agregar, editar y cancelar líneas son ediciones del pedido: van por el mismo
 // patrón de auditoría obligatoria que PATCH /:id y PATCH /:id/cancelar
-// (solo admin + motivo requerido + registro en pedidos_auditoria).
+// (admin y operador + motivo requerido + registro en pedidos_auditoria).
 
 // Resuelve el pedido de la ruta y corta con el status correcto si no se puede
 // editar. Devuelve { pedido, motivo } o null si ya respondió.
@@ -433,7 +450,7 @@ async function contextoEdicion(req, res, { exigirMotivo = true } = {}) {
 }
 
 // POST /api/pedidos/:id/lineas — agregar una o más líneas a un pedido existente
-router.post('/:id/lineas', requireAdmin, async (req, res, next) => {
+router.post('/:id/lineas', requireEscritura, async (req, res, next) => {
   try {
     const ctx = await contextoEdicion(req, res);
     if (!ctx) return;
@@ -460,7 +477,7 @@ router.post('/:id/lineas', requireAdmin, async (req, res, next) => {
 // Espera la definición COMPLETA de la línea (plato_id, cantidad, modo y las
 // fechas del modo), no un parche parcial: así la combinación modo/fechas se
 // valida como un todo y nunca se arma un UPDATE que viole el CHECK de la tabla.
-router.patch('/:id/lineas/:lineaId', requireAdmin, async (req, res, next) => {
+router.patch('/:id/lineas/:lineaId', requireEscritura, async (req, res, next) => {
   try {
     const ctx = await contextoEdicion(req, res);
     if (!ctx) return;
@@ -515,7 +532,7 @@ router.patch('/:id/lineas/:lineaId', requireAdmin, async (req, res, next) => {
 
 // PATCH /api/pedidos/:id/lineas/:lineaId/cancelar — cancelar una línea sola,
 // sin cancelar el pedido entero.
-router.patch('/:id/lineas/:lineaId/cancelar', requireAdmin, async (req, res, next) => {
+router.patch('/:id/lineas/:lineaId/cancelar', requireEscritura, async (req, res, next) => {
   try {
     const ctx = await contextoEdicion(req, res);
     if (!ctx) return;
@@ -543,7 +560,7 @@ router.patch('/:id/lineas/:lineaId/cancelar', requireAdmin, async (req, res, nex
 // PUT /api/pedidos/:id/lineas/:lineaId/excepciones — alta o edición de la
 // excepción de una fecha. PUT y no POST porque es idempotente: cargar dos veces
 // la misma fecha actualiza, no duplica (UNIQUE (pedido_detalle_id, fecha)).
-router.put('/:id/lineas/:lineaId/excepciones', requireAdmin, async (req, res, next) => {
+router.put('/:id/lineas/:lineaId/excepciones', requireEscritura, async (req, res, next) => {
   try {
     const ctx = await contextoEdicion(req, res);
     if (!ctx) return;
@@ -616,7 +633,7 @@ router.put('/:id/lineas/:lineaId/excepciones', requireAdmin, async (req, res, ne
 
 // DELETE /api/pedidos/:id/lineas/:lineaId/excepciones/:excId — quitar una
 // excepción; esa fecha vuelve a producirse con los valores de la línea.
-router.delete('/:id/lineas/:lineaId/excepciones/:excId', requireAdmin, async (req, res, next) => {
+router.delete('/:id/lineas/:lineaId/excepciones/:excId', requireEscritura, async (req, res, next) => {
   try {
     const ctx = await contextoEdicion(req, res);
     if (!ctx) return;

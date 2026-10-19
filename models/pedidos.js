@@ -4,7 +4,10 @@ const detalle = require('./pedidoDetalle');
 // Registra una entrada en pedidos_auditoria. Es el mismo patrón de auditoría
 // obligatoria que ya usaban update() y cancelar(), extraído para poder reusarlo
 // desde las operaciones sobre líneas y excepciones (fase 6).
-// accion: 'edicion' | 'cancelacion' (CHECK de la tabla).
+// accion: 'edicion' | 'cancelacion' | 'creacion' | 'pago' (CHECK de la tabla).
+// motivo va null en 'creacion' y 'pago' — nadie justifica por escrito haber
+// cargado un pedido; en 'edicion' y 'cancelacion' sigue siendo obligatorio y
+// lo exige tanto el CHECK de la tabla como routes/pedidos.js (fase 8).
 async function auditar(pedidoId, accion, usuario, detalleJson, motivo, ejecutor = pool) {
   await ejecutor.query(
     `INSERT INTO pedidos_auditoria (pedido_id, accion, usuario, detalle, motivo)
@@ -26,13 +29,36 @@ async function getById(id) {
   return result.rows[0] || null;
 }
 
-// Actualiza solo el estado de pago y el monto pagado de un pedido existente.
-async function updatePago(id, estado_pago, monto_pagado) {
-  const result = await pool.query(
-    `UPDATE pedidos SET estado_pago = $1, monto_pagado = $2 WHERE id = $3 RETURNING *`,
-    [estado_pago, monto_pagado === undefined ? null : monto_pagado, id]
-  );
-  return result.rows[0] || null;
+// Actualiza solo el estado de pago y el monto pagado de un pedido existente, y
+// lo registra en pedidos_auditoria — las dos cosas en una transacción, para que
+// no pueda quedar un cobro marcado sin constancia de quién lo marcó.
+// pedidoActual: fila de pedidos antes del cambio (para el "antes" del detalle).
+async function updatePago(id, pedidoActual, estado_pago, monto_pagado, usuario) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `UPDATE pedidos SET estado_pago = $1, monto_pagado = $2 WHERE id = $3 RETURNING *`,
+      [estado_pago, monto_pagado === undefined ? null : monto_pagado, id]
+    );
+    const actualizado = result.rows[0] || null;
+
+    if (actualizado) {
+      await auditar(id, 'pago', usuario, {
+        antes:   { estado_pago: pedidoActual.estado_pago, monto_pagado: pedidoActual.monto_pagado },
+        despues: { estado_pago: actualizado.estado_pago,  monto_pagado: actualizado.monto_pagado },
+      }, null, client);
+    }
+
+    await client.query('COMMIT');
+    return actualizado;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // Actualiza campos editables de un pedido (monto, fecha_pedido, tipo_vianda) y registra
@@ -216,9 +242,17 @@ async function viandasPorTipoPorSemana(fecha_desde, fecha_hasta) {
 // tipo_vianda / descripcion siguen existiendo y no cambian: las líneas de
 // pedido_detalle se suman a lo que ya había, no lo reemplazan (el dashboard
 // histórico depende de tipo_vianda).
+//
+// recibido_por (id) y usuario (username) son la misma persona guardada dos
+// veces a propósito: el id para poder hacer JOIN con usuarios y mostrar
+// "Cargado por" en el detalle, y el username en pedidos_auditoria para que el
+// historial siga siendo legible aunque después se renombre al usuario. La
+// auditoría de la creación va DENTRO de la transacción: si no se puede
+// registrar quién cargó el pedido, el pedido no se guarda (fase 8).
 async function create({
   cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
   fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id, lineas = [],
+  recibido_por = null, usuario,
 }) {
   const client = await pool.connect();
   try {
@@ -227,8 +261,8 @@ async function create({
     const result = await client.query(
       `INSERT INTO pedidos
          (cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
-          fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id, recibido_por)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         cliente_id,
@@ -243,11 +277,18 @@ async function create({
         fecha_entrega_hasta || null,
         detalle_modificacion || null,
         ubicacion_id || null,
+        recibido_por || null,
       ]
     );
     const pedido = result.rows[0];
 
     if (lineas.length) await detalle.createMany(pedido.id, lineas, client);
+
+    await auditar(pedido.id, 'creacion', usuario, {
+      cliente_id,
+      monto,
+      cantidad_lineas: lineas.length,
+    }, null, client);
 
     await client.query('COMMIT');
     return pedido;
@@ -269,10 +310,14 @@ async function getConDetalle(id) {
       c.segmento        AS cliente_segmento,
       c.tipo_envase     AS cliente_tipo_envase,
       u.direccion       AS ubicacion_direccion,
-      u.zona            AS ubicacion_zona
+      u.zona            AS ubicacion_zona,
+      -- Quién cargó el pedido. LEFT JOIN porque recibido_por es NULL en los
+      -- pedidos anteriores a la fase 8 y en los que arma sola la grilla.
+      usr.username      AS recibido_por_username
     FROM pedidos p
     JOIN clientes c    ON c.id = p.cliente_id
     LEFT JOIN ubicaciones u ON u.id = p.ubicacion_id
+    LEFT JOIN usuarios usr  ON usr.id = p.recibido_por
     WHERE p.id = $1
   `, [id]);
   const pedido = r.rows[0];

@@ -82,13 +82,14 @@ narma_crm/
 │   ├── grilla.js              # /api/grilla/* (fase 7)
 │   └── export.js              # /api/export (Excel: datos | historial | pedidos)
 │
-├── views/                     # HTML servidos por sendFile (12 vistas)
+├── views/                     # HTML servidos por sendFile (13 vistas)
 │   ├── login.html · 403.html
 │   ├── dashboard.html         # admin + visor
 │   ├── inicio.html            # operador
 │   ├── clientes.html · cliente-ficha.html · cliente-form.html
 │   ├── pedidos.html · pedido-form.html · pedido-detalle.html
-│   └── grilla.html · grilla-dia.html     # fase 7
+│   ├── grilla.html · grilla-dia.html     # fase 7
+│   └── cuenta.html            # fase 8 — cambio de contraseña propia (todos los roles)
 │
 ├── public/
 │   ├── css/styles.css         # Estilos Närma. Incluye sección GRILLA y reglas @media print
@@ -99,7 +100,8 @@ narma_crm/
 │   ├── fase4_drop_legacy_tables.sql    ✅ aplicada
 │   ├── fase5_indices.sql               ✅ aplicada
 │   ├── fase6_pedidos_estructurados.sql ✅ aplicada
-│   └── fase7_grilla_comedor.sql        ⏳ PENDIENTE
+│   ├── fase7_grilla_comedor.sql        ⏳ PENDIENTE
+│   └── fase8_auditoria_usuarios.sql    ⏳ PENDIENTE
 │
 └── supabase/                  # Schema histórico (schema.sql es la base original)
 ```
@@ -115,7 +117,10 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 |---|---|---|
 | POST | `/api/login` | Público (rate limit 8/15min por IP). **302** a `/dashboard` o `/inicio`, setea cookie `narma_token` |
 | POST | `/api/logout` | Autenticado |
-| GET | `/api/me` | Autenticado. `{ user: {id, username, rol, gestiona_grilla}, alertDays }` — `gestiona_grilla` se lee de la base, no del JWT |
+| GET | `/api/me` | Autenticado. `{ user: {id, username, rol, gestiona_grilla}, alertDays }` — todo sale de la base, no del JWT |
+| POST | `/api/cuenta/password` | Autenticado, **cualquier rol incluido visor** (rate limit 8/15min por IP, con contador propio). Cambia la contraseña del usuario logueado |
+
+> **`requireAuth` lee la base en cada request** (fase 8): una consulta por id que trae `activo`, `rol` y `gestiona_grilla`. Si el usuario no existe o está desactivado, limpia la cookie y devuelve 401 (API) o redirige a `/login` (páginas). El **rol sale de la base**, así que cambiarlo aplica en el acto y no al vencer el token de 8 h.
 
 ### Clientes (routes/clientes.js)
 | Método | Ruta | Permiso |
@@ -135,11 +140,13 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 | GET | `/api/pedidos/:id` | Autenticado. Pedido + líneas + excepciones |
 | GET | `/api/pedidos/:id/auditoria` | Autenticado |
 | GET | `/api/pedidos/sync/errores` | **solo admin**. Bitácora de syncs fallidos |
-| POST | `/api/pedidos` | admin, operador. Acepta `lineas[]` |
-| PATCH | `/api/pedidos/:id/pago` | admin, operador |
-| PATCH | `/api/pedidos/:id` · `/:id/cancelar` | **solo admin**, motivo obligatorio |
-| POST/PATCH | `/:id/lineas` · `/:id/lineas/:lineaId` · `/cancelar` | **solo admin**, motivo obligatorio |
-| PUT/DELETE | `/:id/lineas/:lineaId/excepciones[/:excId]` | **solo admin**, motivo obligatorio |
+| POST | `/api/pedidos` | admin, operador. Acepta `lineas[]`. Guarda `recibido_por` y audita `creacion` **en la misma transacción** (fase 8) |
+| PATCH | `/api/pedidos/:id/pago` | admin, operador. Audita `pago` con antes/después, en la misma transacción (fase 8) |
+| PATCH | `/api/pedidos/:id` · `/:id/cancelar` | admin, operador (visor bloqueado), motivo obligatorio |
+| POST/PATCH | `/:id/lineas` · `/:id/lineas/:lineaId` · `/cancelar` | admin, operador (visor bloqueado), motivo obligatorio |
+| PUT/DELETE | `/:id/lineas/:lineaId/excepciones[/:excId]` | admin, operador (visor bloqueado), motivo obligatorio |
+
+> **Editar y cancelar pedidos dejó de ser exclusivo del admin** (fase 8): lo hace cualquiera que no sea visor, con el **motivo obligatorio y la auditoría intactos**. Lo único que sigue pidiendo rol admin en este archivo es `GET /sync/errores`.
 
 > **Los pedidos con `origen = 'grilla'` rechazan con 400 todos los endpoints de edición de arriba** (incluido `/pago`): los gobierna la grilla semanal y cualquier cambio manual sería pisado en el siguiente envío.
 
@@ -163,7 +170,7 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 `GET /api/export?tipo=datos|historial|pedidos` — autenticado. **Excluye los pedidos `origen='grilla'`** de las hojas y de los promedios/totales de monto.
 
 ### Páginas (server.js)
-`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
+`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/cuenta` (cualquier usuario logueado), `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
 
 ---
 
@@ -172,12 +179,14 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 | Rol | Dashboard/KPIs | Ver clientes/pedidos | Crear/editar cliente | Crear pedido | Editar pago | Editar/cancelar pedido, líneas | Estado/seguimiento cliente | Ver grilla | Editar grilla |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **admin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **operador** | ❌ (va a `/inicio`) | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | solo con permiso | solo con permiso |
+| **operador** | ❌ (va a `/inicio`) | ✅ | ✅ | ✅ | ✅ | ✅ (fase 8) | ❌ | solo con permiso | solo con permiso |
 | **visor** | ✅ (solo lectura) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (lectura) | ❌ |
 
 - **`usuarios.gestiona_grilla` NO es un rol**: es un permiso aparte, en su propia columna. En producción lo tiene `Admin1`, que es **`operador`**. Editar la grilla depende solo de ese flag; ser admin no alcanza.
 - Se lee de la base en cada request de escritura (`usuarios.gestionaGrilla`), no del JWT: sacarle el permiso a alguien aplica en el acto y no cuando se le vence el token de 8 h.
-- Auth por JWT (8 h) en cookie `narma_token` (`httpOnly, secure, sameSite:lax`).
+- Auth por JWT (8 h) en cookie `narma_token` (`httpOnly, secure, sameSite:lax`). El token solo dice **quién** es: `activo` y `rol` se leen de la base en cada request (fase 8).
+- **`usuarios.activo = false`** corta el acceso en el acto: el login responde 401 `Usuario desactivado`, y un request con un token todavía vigente queda sin cookie y afuera. Se desactiva, no se borra: el id está referenciado por `pedidos.recibido_por`/`verificado_por` y `grilla_celdas.updated_by`.
+- **Cada usuario cambia su propia contraseña** en `/cuenta` (visor incluido): pide la actual, exige 8 caracteres como mínimo y guarda un hash bcrypt. Nadie cambia la de otro desde la app.
 
 **Usuarios en producción:** `Admin1` (operador, `gestiona_grilla` tras correr la fase 7), `Admin2` (operador), `Guadalupe` (admin), `Stefano` (admin), `Direccion` (visor).
 `seed.js` usa los mismos usernames con contraseñas ficticias — **no correrlo contra producción**.
@@ -189,17 +198,21 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 ### Base del CRM (`bjnwremoaooglpxrnzgi`)
 
 #### `usuarios`
-`id` · `username` UNIQUE · `password_hash` · `rol` CHECK IN (`operador`,`admin`,`visor`) · **`gestiona_grilla` BOOLEAN NOT NULL default false** (fase 7) · `created_at`
+`id` · `username` UNIQUE · `password_hash` · `rol` CHECK IN (`operador`,`admin`,`visor`) · **`gestiona_grilla` BOOLEAN NOT NULL default false** (fase 7) · **`activo` BOOLEAN NOT NULL default true** (fase 8) · `created_at`
 
 #### `clientes`
 `id` · `nombre_completo` · `cedula` UNIQUE · `email` · `telefono`/`telefono2`/`telefono3` · `observaciones` · `segmento` CHECK IN (`particular`,`empresa`,`embajador`) · `empresa` · `canal_origen` · `codigo_embajador` · `estado` · `fecha_ingreso` · `seguimiento_marcado`/`seguimiento_fecha` · **`tipo_envase` CHECK IN (`Narma`,`Venezia`) default `Venezia`** (fase 6) · `created_at`/`updated_at`
 
 #### `pedidos`
-`id` · `cliente_id` FK · `fecha_pedido` · `monto` INTEGER NOT NULL (**sin CHECK: acepta 0**) · `monto_pagado` · `estado_pago` · `medio_pago` · `tipo_vianda` · `descripcion` · `fecha_entrega_desde`/`hasta` · `detalle_modificacion` · `cancelado` · **`ubicacion_id` FK→ubicaciones ON DELETE SET NULL** (fase 6) · **`origen` CHECK IN (`grilla`)** y **`semana_lunes` DATE** (fase 7) · `created_at`
+`id` · `cliente_id` FK · `fecha_pedido` · `monto` INTEGER NOT NULL (**sin CHECK: acepta 0**) · `monto_pagado` · `estado_pago` · `medio_pago` · `tipo_vianda` · `descripcion` · `fecha_entrega_desde`/`hasta` · `detalle_modificacion` · `cancelado` · **`ubicacion_id` FK→ubicaciones ON DELETE SET NULL** (fase 6) · **`origen` CHECK IN (`grilla`)** y **`semana_lunes` DATE** (fase 7) · **`recibido_por` FK→usuarios** (quién lo cargó; NULL en los 772 pedidos anteriores a la fase 8 y en los que arma la grilla) · `verificado_por` FK→usuarios (sin uso en el código) · `created_at`
 Índice único parcial `(cliente_id, semana_lunes) WHERE origen='grilla'`.
 
-#### `ubicaciones` · `pedidos_auditoria`
+#### `ubicaciones`
 Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
+
+#### `pedidos_auditoria`
+`pedido_id` FK · `accion` · `usuario` TEXT (username) · `detalle` JSONB · `motivo` · `fecha`.
+**Fase 8**: `accion` pasa a CHECK IN (`edicion`,`cancelacion`,`creacion`,`pago`) y `motivo` deja de ser NOT NULL — `creacion` y `pago` van sin motivo, y un CHECK nuevo lo sigue exigiendo no vacío en `edicion` y `cancelacion`.
 
 #### Fase 6
 - **`platos`**: `id` · `categoria` · `nombre` · `activo` INTEGER (0/1). UNIQUE `(categoria, nombre)`.
@@ -228,13 +241,14 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 | Clientes: CRUD, filtros, búsqueda, ficha, colaboradores por empresa, hasta 3 ubicaciones | ✅ |
 | Dashboard (admin/visor): KPIs, evolución 6 meses, ticket por segmento, alertas | ✅ |
 | Pedidos: alta, estado de pago, historial con filtros, export Excel | ✅ |
-| Pedidos: edición y cancelación con auditoría y motivo obligatorio (solo admin) | ✅ (fase 3) |
+| Pedidos: edición y cancelación con auditoría y motivo obligatorio | ✅ (fase 3; desde la fase 8 también el operador, visor no) |
 | Hardening: helmet + CSP, rate limit, índices | ✅ (fase 5) |
 | Pedidos estructurados: catálogo de platos, líneas puntuales/recurrentes, excepciones por fecha | ✅ (fase 6) |
 | Sync CRM → Narma Pedidos (auto-reparador, nunca bloquea el guardado, bitácora de errores) | ✅ (fase 6) |
 | Grilla semanal de comedor: planes, celdas, rangos, día sin servicio, pedido general | ✅ (fase 7, sin mergear) |
 | Grilla: totales por plato/día calculados en el servidor y envío como pedido semanal | ✅ (fase 7) |
 | Grilla: hoja del día imprimible | ✅ (fase 7) |
+| Auditoría de creación y de cambio de pago, `recibido_por` en el detalle del pedido, usuarios desactivables, cambio de contraseña propia | ✅ (fase 8, sin mergear) |
 | Facturación del comedor, control de retiro, importación de la planilla del banco | ❌ Fuera de alcance de la fase 7 |
 | App de colaboradores | ❌ No existe |
 
@@ -258,6 +272,9 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 ## 10. Próximos sprints (backlog sugerido — no comprometido)
 
 - **Correr `migrations/fase7_grilla_comedor.sql`** y crear/vincular los clientes cuenta-empresa de UENO BANK, Kaitel e Itti SAE.
+- **Correr `migrations/fase8_auditoria_usuarios.sql`**. Sin ella, la creación de pedidos falla: el INSERT de auditoría no pasa el CHECK viejo de `accion` y la transacción se cae entera.
+- UI de administración de usuarios: hoy `usuarios.activo` y el reseteo de contraseña ajena se tocan por SQL. El usuario cambia la propia desde `/cuenta`.
+- Completar `recibido_por` en el pedido semanal de la grilla (hoy queda NULL y el detalle muestra "—").
 - Facturación del comedor: hoy el pedido semanal nace con `monto = 0` a propósito.
 - Control de retiro e importación de la planilla del banco (quedaron fuera de la fase 7).
 - UI para administrar `grilla_empresas` en lugar de SQL a mano.
