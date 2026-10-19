@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · resumen del día</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <div class="view" style="max-width:1100px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">resumen del día</div>
+          <div class="view-header-sub" id="sub-header">Cargando...</div>
+        </div>
+      </div>
+
+      <div class="nota">
+        Todo lo que va a producir cocina para un día, de todas las fuentes juntas: la grilla de
+        comedor, las empresas y los particulares. Es una pantalla de solo lectura — para cambiar algo
+        hay que ir al pedido o a la grilla.
+      </div>
+
+      <div id="error-global" class="form-error hidden"></div>
+
+      <div class="card">
+        <div class="filter-row" style="margin-bottom:0;align-items:center;">
+          <button class="btn-secondary" id="btn-prev" style="flex:0 0 auto;min-width:0;">◀ Día anterior</button>
+          <input type="date" id="f-fecha" title="Día" style="flex:0 0 auto;min-width:0;width:170px;"/>
+          <button class="btn-secondary" id="btn-next" style="flex:0 0 auto;min-width:0;">Día siguiente ▶</button>
+          <button class="btn-secondary" id="btn-manana" style="flex:0 0 auto;min-width:0;">Mañana</button>
+        </div>
+      </div>
+
+      <div id="contenido"></div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const DIAS_LARGOS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+    // Fecha que está mostrando la pantalla. La primera carga va sin fecha: la
+    // resuelve el servidor (mañana en hora de Asunción) y vuelve en la
+    // respuesta, así el día no depende del reloj ni de la zona del navegador.
+    let fechaActual = null;
+    let HOY = null;
+
+    (async function () {
+      await ensureSession();
+      renderNav('/resumen');
+
+      const params = new URLSearchParams(window.location.search);
+      fechaActual = params.get('fecha') || null;
+
+      document.getElementById('f-fecha').addEventListener('change', (ev) => {
+        if (ev.target.value) { fechaActual = ev.target.value; cargar(); }
+      });
+      document.getElementById('btn-prev').addEventListener('click', () => { fechaActual = sumarDiasISO(fechaActual, -1); cargar(); });
+      document.getElementById('btn-next').addEventListener('click', () => { fechaActual = sumarDiasISO(fechaActual, 1); cargar(); });
+      document.getElementById('btn-manana').addEventListener('click', () => { fechaActual = null; cargar(); });
+
+      await cargar();
+    })();
+
+    // Aritmética de días en UTC, igual que en el servidor: sumar 86.400.000 ms
+    // es exacto y no depende del horario de verano de la máquina.
+    function sumarDiasISO(iso, n) {
+      const [y, m, d] = iso.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d) + n * 86400000);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+    }
+
+    function diaSemanaISO(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    }
+
+    function mostrarError(msg) {
+      const box = document.getElementById('error-global');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+
+    async function cargar() {
+      document.getElementById('error-global').classList.add('hidden');
+      document.getElementById('contenido').innerHTML = '<div class="card"><div class="empty-state">Cargando...</div></div>';
+
+      let data;
+      try {
+        data = await api('/api/resumen' + (fechaActual ? '?fecha=' + encodeURIComponent(fechaActual) : ''));
+      } catch (e) {
+        document.getElementById('contenido').innerHTML = '';
+        mostrarError('No se pudo cargar el resumen: ' + e.message);
+        return;
+      }
+
+      fechaActual = data.resumen.fecha;
+      HOY = data.hoy;
+      document.getElementById('f-fecha').value = fechaActual;
+
+      const relativo = fechaActual === HOY ? ' · hoy'
+        : fechaActual === sumarDiasISO(HOY, 1) ? ' · mañana'
+        : fechaActual === sumarDiasISO(HOY, -1) ? ' · ayer' : '';
+      document.getElementById('sub-header').textContent =
+        `${DIAS_LARGOS[diaSemanaISO(fechaActual)]} ${fmtFecha(fechaActual)}${relativo}`;
+
+      render(data.resumen);
+    }
+
+    function render(r) {
+      const cont = document.getElementById('contenido');
+      const hayAlgo = r.entregas > 0 || r.total.totales.cocina.total > 0;
+
+      cont.innerHTML = [
+        // Con el día vacío de los dos lados no hay nada que controlar: un
+        // "coincide con cocina" ahí sería un visto bueno sobre la nada. El
+        // aviso de que no se pudo leer cocina sí va igual, porque en ese caso
+        // el día podría no estar vacío de verdad.
+        (hayAlgo || !r.cocina.disponible) ? avisoCocina(r) : '',
+        hayAlgo ? metricas(r) : '',
+        hayAlgo
+          ? cardTotal(r)
+          : '<div class="card"><div class="empty-state">No hay nada cargado para este día.</div></div>',
+        hayAlgo ? cardsFuentes(r) : '',
+      ].join('');
+    }
+
+    // ── Control contra cocina ──────────────────────────────────────
+    // El aviso de arriba resume el control: verde si todo cuadra, naranja con
+    // la cantidad de platos descuadrados si no, y amarillo si la base de
+    // cocina no se pudo leer (en ese caso el resto del resumen sirve igual,
+    // pero no está verificado contra nada).
+    function avisoCocina(r) {
+      if (!r.cocina.disponible) {
+        return `<div class="resumen-sin-cocina">
+          <strong>No se pudo controlar contra cocina.</strong>
+          Los totales de abajo son los del CRM y no están verificados contra lo que recibió
+          Narma Pedidos. ${escapeHtml(r.cocina.motivo || '')}
+        </div>`;
+      }
+      const conDif = r.total.platos.filter(p => !p.coincide);
+      if (!conDif.length) {
+        return '<div class="resumen-ok">✓ Coincide con cocina</div>';
+      }
+      return `<div class="alerta-banner">
+        No coincide con cocina: ${conDif.length} plato${conDif.length === 1 ? '' : 's'} con diferencia
+        (${escapeHtml(conDif.map(p => p.plato).join(', '))}).
+      </div>`;
+    }
+
+    function metricas(r) {
+      return `
+        <div class="metric-grid">
+          <div class="metric metric-blue">
+            <div class="metric-label">Total del día</div>
+            <div class="metric-value">${r.total.totales.crm.total}</div>
+            <div class="metric-sub">${r.total.platos.length} plato${r.total.platos.length === 1 ? '' : 's'} distinto${r.total.platos.length === 1 ? '' : 's'}</div>
+          </div>
+          <div class="metric metric-orange">
+            <div class="metric-label">Envase Narma</div>
+            <div class="metric-value">${r.total.totales.crm.Narma}</div>
+          </div>
+          <div class="metric metric-green">
+            <div class="metric-label">Envase Venezia</div>
+            <div class="metric-value">${r.total.totales.crm.Venezia}</div>
+          </div>
+          <div class="metric metric-yellow">
+            <div class="metric-label">Fuentes</div>
+            <div class="metric-value">${r.fuentes.length}</div>
+            <div class="metric-sub">${escapeHtml(r.fuentes.map(f => f.fuente).join(' · '))}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Número del CRM y, solo si no coincide, lo que recibió cocina con la
+    // diferencia firmada. Las dos columnas de envase van siempre, aunque una
+    // esté en 0: que no haya nada en Narma es información.
+    function celda(crm, cocina, mostrarCocina) {
+      const dif = cocina - crm;
+      const clase = crm === 0 ? ' resumen-num-cero' : '';
+      const signo = dif > 0 ? '+' : '−';
+      return `<td class="resumen-num${clase}">${crm}${
+        mostrarCocina && dif !== 0
+          ? `<span class="resumen-cocina">cocina: ${cocina} (${signo}${Math.abs(dif)})</span>`
+          : ''
+      }</td>`;
+    }
+
+    function cardTotal(r) {
+      const mostrarCocina = r.cocina.disponible;
+      const t = r.total.totales;
+
+      return `
+        <div class="card">
+          <div class="card-title">total del día · plato × envase</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Plato</th><th style="text-align:right;">Envase Narma</th><th style="text-align:right;">Envase Venezia</th><th style="text-align:right;">Total</th></tr>
+              </thead>
+              <tbody>
+                ${r.total.platos.map(p => `
+                  <tr${mostrarCocina && !p.coincide ? ' class="resumen-fila-dif"' : ''}>
+                    <td style="white-space:normal;">${escapeHtml(p.plato)}</td>
+                    ${celda(p.crm.Narma, p.cocina.Narma, mostrarCocina)}
+                    ${celda(p.crm.Venezia, p.cocina.Venezia, mostrarCocina)}
+                    ${celda(p.crm.total, p.cocina.total, mostrarCocina)}
+                  </tr>
+                `).join('')}
+                <tr class="resumen-fila-total">
+                  <td>Total</td>
+                  ${celda(t.crm.Narma, t.cocina.Narma, mostrarCocina)}
+                  ${celda(t.crm.Venezia, t.cocina.Venezia, mostrarCocina)}
+                  ${celda(t.crm.total, t.cocina.total, mostrarCocina)}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="text-muted" style="font-size:9px;margin-top:8px;">
+            ${mostrarCocina
+              ? 'Debajo de cada número, en naranja, lo que cocina tiene cargado de verdad (pedidos_crm_detalle) cuando no coincide.'
+              : 'Sin el control contra cocina: estos números son los que calcula el CRM.'}
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Desglose por fuente ────────────────────────────────────────
+    // Un bloque por fuente, con su total por plato y el detalle por cliente
+    // para desplegar. Así cada heladera, AYMAC y Matrix se ven por separado, y
+    // la grilla de comedor queda en su propio bloque.
+    function cardsFuentes(r) {
+      return `
+        <div class="card">
+          <div class="card-title">desglose por fuente</div>
+          ${r.fuentes.map((f, i) => `
+            <div${i ? ' style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px;"' : ''}>
+              <div class="resumen-fuente-head">
+                <span class="resumen-fuente-nombre">${escapeHtml(f.fuente)}</span>
+                <span class="resumen-fuente-total">${f.total} vianda${f.total === 1 ? '' : 's'} · ${f.detalle.length} línea${f.detalle.length === 1 ? '' : 's'}</span>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Plato</th><th style="text-align:right;">Cantidad</th></tr></thead>
+                  <tbody>
+                    ${f.platos.map(p => `
+                      <tr><td style="white-space:normal;">${escapeHtml(p.plato)}</td>
+                          <td class="resumen-num">${p.cantidad}</td></tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+              <details class="resumen-detalle">
+                <summary>Ver detalle por cliente</summary>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Cliente</th><th>Plato</th><th>Envase</th><th style="text-align:right;">Cantidad</th></tr></thead>
+                    <tbody>
+                      ${f.detalle.map(d => `
+                        <tr>
+                          <td style="white-space:normal;">${escapeHtml(d.cliente)}</td>
+                          <td style="white-space:normal;">${escapeHtml(d.plato)}</td>
+                          <td>${escapeHtml(d.envase || '—')}</td>
+                          <td class="resumen-num">${d.cantidad}</td>
+                        </tr>
+                        ${d.comentario ? `<tr><td colspan="4" class="text-muted" style="white-space:normal;font-size:9px;padding-top:0;">${escapeHtml(d.comentario)}</td></tr>` : ''}
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>

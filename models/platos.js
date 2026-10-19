@@ -4,16 +4,21 @@ const pool = require('./db');
 // SQL Editor de Supabase: cualquier fila nueva aparece sola en el form de
 // pedido, sin deploy. Por eso acá no hay lista hardcodeada de categorías.
 //
-// Única excepción: la categoría 'General' (fase 7). Son ítems que NO se piden
-// por persona (sopa, ensalada mixta, jugo, vinagreta): no tienen sentido como
-// línea de un pedido de particular ni como plato base / celda de la grilla.
-// Viven en la misma tabla porque van al mismo pedido semanal y los nombra el
-// mismo sync.
+// Única excepción: la categoría 'General' (fase 7). Son ítems que no se piden
+// por persona (sopa, ensalada mixta, jugo, vinagreta), así que no tienen
+// sentido como plato base ni como celda de la grilla de comedor. Viven en la
+// misma tabla porque van al mismo pedido semanal y los nombra el mismo sync.
 //
-// Ojo con la dirección de la exclusión: 'General' queda afuera del catálogo
-// "por persona", pero el PEDIDO GENERAL de la grilla no está limitado a esa
-// categoría. Ahí entra cualquier plato activo, porque las encargadas piden
-// sándwiches, wraps y ensaladas además de sopa y jugo.
+// Dónde entra y dónde no (fase 9):
+//   grilla, plato base y celdas → NO. Son el plato de UNA persona.
+//   pedido general de la grilla → SÍ, y además cualquier otro plato activo:
+//     las encargadas piden sándwiches, wraps y ensaladas por cantidad.
+//   pedidos normales             → SÍ, para cualquier cliente. Matrix pide
+//     sopa y jugo como pedido normal, y nada impide que otro lo haga.
+//
+// O sea: la exclusión de 'General' es de la grilla por persona, no de los
+// pedidos. De ahí que haya dos validaciones (idsActivos / idsActivosTodos) y
+// dos catálogos (listActivosPorCategoria / listTodosActivosPorCategoria).
 const CATEGORIA_GENERAL = 'General';
 
 // ── Etiqueta de un plato ─────────────────────────────────────────
@@ -49,7 +54,8 @@ function agruparPorCategoria(filas) {
 }
 
 // Platos activos, agrupados por categoría para armar los <optgroup> del select.
-// Excluye 'General' (ver arriba): este es el catálogo "por persona".
+// Excluye 'General' (ver arriba): este es el catálogo "por persona", el que usa
+// la grilla de comedor. Es lo que devuelve GET /api/platos sin parámetros.
 async function listActivosPorCategoria() {
   const r = await pool.query(`
     SELECT id, categoria, nombre
@@ -60,11 +66,13 @@ async function listActivosPorCategoria() {
   return agruparPorCategoria(r.rows);
 }
 
-// Catálogo del PEDIDO GENERAL de la grilla: todos los platos activos, de
-// cualquier categoría, agrupados igual que el de arriba. A diferencia de
-// listActivosPorCategoria(), este NO excluye 'General': el pedido general
-// mezcla los ítems que no van por persona (sopa, jugo) con platos comunes
-// (wraps, ensaladas) que la encargada pide por cantidad y no por colaborador.
+// Catálogo completo: todos los platos activos, de cualquier categoría,
+// agrupados igual que el de arriba. A diferencia de listActivosPorCategoria(),
+// este NO excluye 'General'.
+//
+// Lo usan el PEDIDO GENERAL de la grilla —que mezcla los ítems que no van por
+// persona (sopa, jugo) con platos comunes que la encargada pide por cantidad—
+// y los PEDIDOS NORMALES, vía GET /api/platos?incluir_general=1 (fase 9).
 async function listTodosActivosPorCategoria() {
   const r = await pool.query(`
     SELECT id, categoria, nombre
@@ -75,9 +83,9 @@ async function listTodosActivosPorCategoria() {
   return agruparPorCategoria(r.rows);
 }
 
-// Subconjunto de ids que existen y están activos. Se usa para validar las
-// líneas de un pedido en una sola consulta, en lugar de una por línea.
-// Excluye 'General' por el mismo motivo que listActivosPorCategoria().
+// Subconjunto de ids que existen y están activos, excluyendo 'General' por el
+// mismo motivo que listActivosPorCategoria(): es la validación de lo que come
+// UNA persona — el plato base y las celdas de la grilla de comedor.
 async function idsActivos(ids) {
   if (!ids.length) return new Set();
   const r = await pool.query(
@@ -87,8 +95,10 @@ async function idsActivos(ids) {
   return new Set(r.rows.map(row => row.id));
 }
 
-// Ídem, pero sin excluir ninguna categoría: es la validación del PEDIDO
-// GENERAL de la grilla, donde entra cualquier plato activo del catálogo.
+// Ídem, pero sin excluir ninguna categoría: valida todo lo que no es "el plato
+// de una persona" — el PEDIDO GENERAL de la grilla y las líneas y excepciones
+// de los pedidos normales (fase 9). Una sola consulta para todas las líneas de
+// un pedido, en lugar de una por línea.
 async function idsActivosTodos(ids) {
   if (!ids.length) return new Set();
   const r = await pool.query(

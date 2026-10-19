@@ -129,7 +129,12 @@ async function parsearLineas(body) {
   }
 
   const ids = raw.map(l => Number(l.plato_id)).filter(Number.isInteger);
-  const platosActivos = await platos.idsActivos([...new Set(ids)]);
+  // idsActivosTodos y no idsActivos: un pedido normal acepta cualquier plato
+  // activo del catálogo, la categoría 'General' incluida (fase 9). Matrix pide
+  // sopa y jugo como pedido normal, y lo mismo puede pasar con cualquier otro
+  // cliente. Lo que sigue sin aceptar 'General' es la grilla: el plato base y
+  // las celdas son por persona (ver routes/grilla.js).
+  const platosActivos = await platos.idsActivosTodos([...new Set(ids)]);
   return validarLineas(raw, platosActivos);
 }
 
@@ -593,7 +598,9 @@ router.put('/:id/lineas/:lineaId/excepciones', requireEscritura, async (req, res
     let plato_id = null;
     if (body.plato_id !== undefined && body.plato_id !== null && body.plato_id !== '') {
       plato_id = Number(body.plato_id);
-      if (!Number.isInteger(plato_id) || !(await platos.idsActivos([plato_id])).has(plato_id)) {
+      // Mismo catálogo que las líneas (idsActivosTodos): si una línea puede
+      // pedir un ítem general, la excepción que la pisa un día también.
+      if (!Number.isInteger(plato_id) || !(await platos.idsActivosTodos([plato_id])).has(plato_id)) {
         errores.push('El plato de la excepción es inválido o está inactivo');
         plato_id = null;
       }

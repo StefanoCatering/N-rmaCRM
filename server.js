@@ -12,6 +12,7 @@ const clientesRouter = require('./routes/clientes');
 const pedidosRouter  = require('./routes/pedidos');
 const platosRouter   = require('./routes/platos');
 const grillaRouter   = require('./routes/grilla');
+const resumenRouter  = require('./routes/resumen');
 const exportRouter   = require('./routes/export');
 
 // Validación de arranque: JWT_SECRET es obligatorio
@@ -312,12 +313,18 @@ function requireVistaGrilla(req, res, next) {
 app.get('/grilla/dia', requireAuth(), requireVistaGrilla, view('grilla-dia.html'));
 app.get('/grilla', requireAuth(), requireVistaGrilla, view('grilla.html'));
 
+// Resumen del día (fase 9): la hoja con la que Administración controla, la
+// noche anterior, que lo cargado cuadre con lo que va a producir cocina.
+// Es de SOLO LECTURA y la ven los tres roles — admin, operador y visor.
+app.get('/resumen', requireAuth(), view('resumen.html'));
+
 // ── API de negocio ────────────────────────────────────────────────
 
 app.use('/api/clientes', requireAuth(), clientesRouter);
 app.use('/api/pedidos',  requireAuth(), pedidosRouter);
 app.use('/api/platos',   requireAuth(), platosRouter);
 app.use('/api/grilla',   requireAuth(), grillaRouter);
+app.use('/api/resumen',  requireAuth(), resumenRouter);
 app.use('/api/export',   requireAuth(), exportRouter);
 
 app.use((req, res) => {

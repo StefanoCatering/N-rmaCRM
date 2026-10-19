@@ -20,6 +20,20 @@ const MAX_DIAS_RANGO = 366;
 // DATE como Date de JS en medianoche LOCAL, así que para volver a string se
 // usan los componentes locales: toISOString() correría el día según el offset
 // de la máquina (en UTC-3 un DATE '2026-03-10' saldría '2026-03-09').
+
+// Paraguay es UTC-3 y Vercel corre en UTC: con new Date() a secas, a partir de
+// las 21:00 de Asunción el servidor ya estaría en el día siguiente. Todo lo que
+// dependa de "qué día es hoy" —los días pasados de la grilla, el día que abre
+// por defecto el resumen— sale de acá, para que no haya dos relojes distintos.
+// models/grilla.js reexporta hoyISO por compatibilidad.
+const ZONA_HORARIA = 'America/Asuncion';
+const FORMATO_ISO = new Intl.DateTimeFormat('en-CA', {
+  timeZone: ZONA_HORARIA, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+function hoyISO() {
+  return FORMATO_ISO.format(new Date());
+}
 function aISO(valor) {
   if (!valor) return null;
   if (typeof valor === 'string') return valor.slice(0, 10);
@@ -280,7 +294,7 @@ async function deleteExcepcion(id, ejecutor = pool) {
 module.exports = {
   // resolución de fechas
   resolverEntregas, expandirHabiles, diasEnRango, aISO, sumarDias, diaSemana,
-  MAX_DIAS_RANGO, DIAS_HABILES,
+  hoyISO, ZONA_HORARIA, MAX_DIAS_RANGO, DIAS_HABILES,
   // lectura
   listByPedido, getById, listExcepciones, excepcionesPorLinea, getExcepcionById,
   // escritura

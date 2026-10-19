@@ -158,13 +158,61 @@ async function listFiltered({
     SELECT
       p.id, p.fecha_pedido, p.monto, p.monto_pagado, p.descripcion, p.estado_pago, p.tipo_vianda, p.cancelado,
       p.origen, p.semana_lunes,
-      c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen, c.empresa
+      c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen, c.empresa,
+      c.tipo_envase
     FROM pedidos p
     JOIN clientes c ON c.id = p.cliente_id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY p.fecha_pedido DESC, p.id DESC
   `;
-  return (await pool.query(sql, params)).rows;
+  const filas = (await pool.query(sql, params)).rows;
+  return conEnvaseEfectivo(filas);
+}
+
+// Envase que hay que mostrar en el listado de pedidos (fase 9). Es el del
+// cliente, salvo que las líneas lo pisen con un override.
+//
+// Un pedido puede llevar los dos envases a la vez: alcanza con una línea con
+// override Narma y otra sin override sobre un cliente Venezia. En ese caso el
+// listado dice 'Mixto' y manda al detalle del pedido, que es donde se ve línea
+// por línea. Un pedido sin líneas (los anteriores a la fase 6) se queda con el
+// envase del cliente, que es el que aplicaría.
+//
+// Una sola consulta para toda la página de resultados, no una por pedido.
+async function conEnvaseEfectivo(filas) {
+  if (!filas.length) return filas;
+
+  const r = await pool.query(`
+    SELECT
+      pedido_id,
+      bool_or(tipo_envase_override IS NULL) AS hay_sin_override,
+      array_agg(DISTINCT tipo_envase_override)
+        FILTER (WHERE tipo_envase_override IS NOT NULL) AS overrides
+    FROM pedido_detalle
+    WHERE pedido_id = ANY($1::int[]) AND cancelado = false
+    GROUP BY pedido_id
+  `, [filas.map(f => f.id)]);
+
+  const porPedido = new Map(r.rows.map(row => [row.pedido_id, row]));
+
+  return filas.map(fila => ({
+    ...fila,
+    tipo_envase_efectivo: envaseEfectivo(fila.tipo_envase, porPedido.get(fila.id)),
+  }));
+}
+
+// La regla en sí, sin base de por medio para poder verificarla sola.
+// lineas: { hay_sin_override, overrides } del pedido, o undefined si no tiene
+// ninguna línea viva.
+function envaseEfectivo(envaseCliente, lineas) {
+  const envases = new Set();
+  if (lineas) {
+    if (lineas.hay_sin_override) envases.add(envaseCliente);
+    for (const e of lineas.overrides || []) envases.add(e);
+  }
+  if (!envases.size) return envaseCliente;
+  if (envases.size === 1) return [...envases][0];
+  return 'Mixto';
 }
 
 // Cantidad de pedidos de vianda (tipo_vianda IS NOT NULL) cuya fecha_pedido cae
@@ -337,4 +385,7 @@ module.exports = {
   listByCliente, getById, getConDetalle, create, listFiltered, updatePago,
   countRecepcionadas, countEntregadas, countCortesia, viandasPorTipoPorSemana,
   update, cancelar, listAuditoria, auditar,
+  // exportada para poder verificar la regla del envase del listado sin pedidos
+  // de prueba en la base
+  envaseEfectivo,
 };

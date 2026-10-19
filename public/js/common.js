@@ -108,6 +108,9 @@ function renderNav(activeHref) {
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'operador') {
     links.push(['/pedidos', 'Pedidos']);
   }
+  // El resumen del día lo ven los tres roles: es solo lectura y es la hoja con
+  // la que se controla, la noche anterior, lo que va a producir cocina.
+  links.push(['/resumen', 'Resumen']);
   // La grilla la ven admin, visor y quien tenga gestiona_grilla (que puede ser
   // un operador: es un permiso aparte del rol). Para el resto, ni aparece.
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor' || CURRENT_USER.gestiona_grilla) {
