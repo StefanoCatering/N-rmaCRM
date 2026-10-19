@@ -403,7 +403,7 @@
           ${pedidos.length ? `
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Monto</th><th>Pagado</th><th>Estado pago</th><th>Medio de pago</th><th>Tipo de vianda</th><th>Descripción</th>${esAdmin ? '<th>Acciones</th>' : ''}</tr></thead>
+                <thead><tr><th>Fecha</th><th>Monto</th><th>Pagado</th><th>Estado pago</th><th>Medio de pago</th><th>Tipo de vianda</th><th>Descripción</th>${puedeEscribir ? '<th>Acciones</th>' : ''}</tr></thead>
                 <tbody>
                   ${pedidos.map(p => `
                     <tr${p.cancelado ? ' style="opacity:0.55;"' : ''}>
@@ -423,7 +423,7 @@
                         ${p.detalle_modificacion ? `<div class="nota mt-8" style="margin-bottom:0;">Modificación: ${escapeHtml(p.detalle_modificacion)}</div>` : ''}
                         ${(p.fecha_entrega_desde || p.fecha_entrega_hasta) ? `<div class="text-muted" style="font-size:9px;margin-top:4px;">Entrega: ${p.fecha_entrega_desde ? fmtFecha(p.fecha_entrega_desde) : '—'} a ${p.fecha_entrega_hasta ? fmtFecha(p.fecha_entrega_hasta) : '—'}</div>` : ''}
                       </td>
-                      ${esAdmin ? `<td style="white-space:nowrap;">
+                      ${puedeEscribir ? `<td style="white-space:nowrap;">
                         ${!p.cancelado ? `
                           <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
                           <button class="btn-secondary btn-cancelar-pedido" data-id="${p.id}" style="padding:2px 8px;font-size:9px;margin-left:4px;">Cancelar</button>

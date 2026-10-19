@@ -393,7 +393,9 @@
         `Mostrando ${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'}`;
 
       const puedeEditar = CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'operador';
-      const esAdmin = CURRENT_USER.rol === 'admin';
+      // La columna de acciones (editar/cancelar pedido) dejó de ser exclusiva
+      // del admin: la ve cualquiera que no sea visor (fase 8).
+      const puedeEditarPedido = CURRENT_USER.rol !== 'visor';
 
       const cont = document.getElementById('tabla-cont');
       if (!pedidos.length) {
@@ -403,7 +405,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Cliente</th><th>Segmento</th><th>Fecha pedido</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${esAdmin ? '<th>Acciones</th>' : ''}</tr>
+                <tr><th>Cliente</th><th>Segmento</th><th>Fecha pedido</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${puedeEditarPedido ? '<th>Acciones</th>' : ''}</tr>
               </thead>
               <tbody>
                 ${pedidos.map(p => {
@@ -428,7 +430,7 @@
                       ${deGrilla
                         ? `<a href="/grilla?empresa=${encodeURIComponent(p.empresa || '')}&lunes=${encodeURIComponent(String(p.semana_lunes || '').slice(0, 10))}" class="nota" style="display:block;margin-top:4px;">ver la grilla de la semana →</a>`
                         : `<a href="/pedidos/${p.id}/editar" class="nota" style="display:block;margin-top:4px;">líneas y excepciones →</a>`}</td>
-                    ${esAdmin ? `<td style="white-space:nowrap;">
+                    ${puedeEditarPedido ? `<td style="white-space:nowrap;">
                       ${!p.cancelado && !deGrilla ? `
                         <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
                         <button class="btn-secondary btn-cancelar-pedido" data-id="${p.id}" style="padding:2px 8px;font-size:9px;margin-left:4px;">Cancelar</button>

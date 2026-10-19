@@ -148,7 +148,7 @@
       // Un pedido cancelado no se edita más, y uno de la grilla de comedor
       // tampoco: en los dos casos el backend lo rechaza, así que la UI no
       // ofrece lo que no va a poder hacer.
-      const bloqueado = PEDIDO.cancelado || esDeGrilla() || CURRENT_USER.rol !== 'admin';
+      const bloqueado = PEDIDO.cancelado || esDeGrilla() || CURRENT_USER.rol === 'visor';
       document.getElementById('card-agregar').classList.toggle('hidden', bloqueado);
       document.getElementById('btn-guardar-ubicacion').disabled = bloqueado;
       // En un pedido de grilla la ubicación la define grilla_empresas: dejar el
@@ -264,9 +264,11 @@
         return;
       }
 
-      const esAdmin = CURRENT_USER.rol === 'admin';
+      // Editar y cancelar líneas dejó de ser exclusivo del admin: lo hace
+      // cualquiera que no sea visor, con motivo obligatorio (fase 8).
+      const puedeEditar = CURRENT_USER.rol !== 'visor';
       cont.innerHTML = lineas.map(l => {
-        const editable = esAdmin && !l.cancelado && !PEDIDO.cancelado && !esDeGrilla();
+        const editable = puedeEditar && !l.cancelado && !PEDIDO.cancelado && !esDeGrilla();
         return `
         <div class="card" style="padding:12px;margin-bottom:10px;" data-linea="${l.id}">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">

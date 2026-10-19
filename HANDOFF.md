@@ -142,9 +142,11 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 | GET | `/api/pedidos/sync/errores` | **solo admin**. Bitácora de syncs fallidos |
 | POST | `/api/pedidos` | admin, operador. Acepta `lineas[]`. Guarda `recibido_por` y audita `creacion` **en la misma transacción** (fase 8) |
 | PATCH | `/api/pedidos/:id/pago` | admin, operador. Audita `pago` con antes/después, en la misma transacción (fase 8) |
-| PATCH | `/api/pedidos/:id` · `/:id/cancelar` | **solo admin**, motivo obligatorio |
-| POST/PATCH | `/:id/lineas` · `/:id/lineas/:lineaId` · `/cancelar` | **solo admin**, motivo obligatorio |
-| PUT/DELETE | `/:id/lineas/:lineaId/excepciones[/:excId]` | **solo admin**, motivo obligatorio |
+| PATCH | `/api/pedidos/:id` · `/:id/cancelar` | admin, operador (visor bloqueado), motivo obligatorio |
+| POST/PATCH | `/:id/lineas` · `/:id/lineas/:lineaId` · `/cancelar` | admin, operador (visor bloqueado), motivo obligatorio |
+| PUT/DELETE | `/:id/lineas/:lineaId/excepciones[/:excId]` | admin, operador (visor bloqueado), motivo obligatorio |
+
+> **Editar y cancelar pedidos dejó de ser exclusivo del admin** (fase 8): lo hace cualquiera que no sea visor, con el **motivo obligatorio y la auditoría intactos**. Lo único que sigue pidiendo rol admin en este archivo es `GET /sync/errores`.
 
 > **Los pedidos con `origen = 'grilla'` rechazan con 400 todos los endpoints de edición de arriba** (incluido `/pago`): los gobierna la grilla semanal y cualquier cambio manual sería pisado en el siguiente envío.
 
@@ -168,7 +170,7 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 `GET /api/export?tipo=datos|historial|pedidos` — autenticado. **Excluye los pedidos `origen='grilla'`** de las hojas y de los promedios/totales de monto.
 
 ### Páginas (server.js)
-`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
+`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/cuenta` (cualquier usuario logueado), `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
 
 ---
 
@@ -177,7 +179,7 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 | Rol | Dashboard/KPIs | Ver clientes/pedidos | Crear/editar cliente | Crear pedido | Editar pago | Editar/cancelar pedido, líneas | Estado/seguimiento cliente | Ver grilla | Editar grilla |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **admin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **operador** | ❌ (va a `/inicio`) | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | solo con permiso | solo con permiso |
+| **operador** | ❌ (va a `/inicio`) | ✅ | ✅ | ✅ | ✅ | ✅ (fase 8) | ❌ | solo con permiso | solo con permiso |
 | **visor** | ✅ (solo lectura) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (lectura) | ❌ |
 
 - **`usuarios.gestiona_grilla` NO es un rol**: es un permiso aparte, en su propia columna. En producción lo tiene `Admin1`, que es **`operador`**. Editar la grilla depende solo de ese flag; ser admin no alcanza.
@@ -239,7 +241,7 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 | Clientes: CRUD, filtros, búsqueda, ficha, colaboradores por empresa, hasta 3 ubicaciones | ✅ |
 | Dashboard (admin/visor): KPIs, evolución 6 meses, ticket por segmento, alertas | ✅ |
 | Pedidos: alta, estado de pago, historial con filtros, export Excel | ✅ |
-| Pedidos: edición y cancelación con auditoría y motivo obligatorio (solo admin) | ✅ (fase 3) |
+| Pedidos: edición y cancelación con auditoría y motivo obligatorio | ✅ (fase 3; desde la fase 8 también el operador, visor no) |
 | Hardening: helmet + CSP, rate limit, índices | ✅ (fase 5) |
 | Pedidos estructurados: catálogo de platos, líneas puntuales/recurrentes, excepciones por fecha | ✅ (fase 6) |
 | Sync CRM → Narma Pedidos (auto-reparador, nunca bloquea el guardado, bitácora de errores) | ✅ (fase 6) |
