@@ -530,6 +530,134 @@ input:focus, select:focus, textarea:focus { border-color: var(--orange); backgro
   font-size: 11px; font-weight: 600; color: var(--navy);
 }
 
+/* El ancho de la vista vive acá y no en un style inline, para que la media
+   query de escritorio pueda pisarlo. */
+.retiros-view { max-width: 640px; margin: 0 auto; }
+
+/* El buscador tenía este margen inline; pasó a clase por el mismo motivo. */
+.retiros-buscador { margin-top: 12px; }
+
+/* Filtro Todos / Faltan / Retiraron. Se combina con el buscador. */
+.retiros-filtros { display: flex; margin-top: 8px; }
+.retiros-filtro {
+  flex: 1 1 auto; padding: 9px 12px;
+  border: 1.5px solid var(--border2); background: white;
+  font-family: var(--font); font-size: 10px; font-weight: 500;
+  color: var(--text2); cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.retiros-filtro:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.retiros-filtro:last-child  { border-radius: 0 var(--radius) var(--radius) 0; }
+.retiros-filtro + .retiros-filtro { border-left: none; }
+.retiros-filtro:hover:not(.activo) { background: var(--beige); }
+.retiros-filtro.activo { background: var(--navy); border-color: var(--navy); color: white; font-weight: 600; }
+
+/* Avisos del Enter en el buscador. Se van solos a los ~4 s. */
+.retiros-aviso-teclado {
+  margin-top: 8px; padding: 8px 12px; border-radius: var(--radius);
+  font-size: 11px; font-weight: 600;
+}
+.retiros-aviso-ok   { background: #E8F5F1;      color: var(--green); border: 1px solid rgba(0,121,94,0.25); }
+.retiros-aviso-ya   { background: var(--beige2); color: var(--navy);  border: 1px solid rgba(245,167,45,0.45); }
+.retiros-aviso-nada { background: var(--beige);  color: var(--text2); border: 1px solid var(--border2); }
+
 @media (max-width: 420px) {
   .retiros-toggle { min-width: 96px; font-size: 10px; }
+}
+
+/* ══════════════════════════════════════════════════════
+   RETIROS EN ESCRITORIO (fase 10b) — a partir de 1000px
+   En el comedor trabajan con computadora y la lista es de ~167 personas.
+   Debajo de este corte no cambia NADA respecto de la fase 10: la misma
+   tarjeta por persona y el mismo botón que alterna.
+   ══════════════════════════════════════════════════════ */
+@media (min-width: 1000px) {
+  .retiros-view { max-width: 1280px; }
+
+  /* ── Barra pegajosa ──────────────────────────────────────────
+     Queda fija debajo del nav, que TAMBIÉN es sticky (z-index 100) y cuya
+     altura depende de cuántos links tenga el rol: por eso el offset lo mide
+     el JS en --nav-h en vez de estar clavado acá. El -1px evita que se vea
+     una rendija de contenido entre el nav y la barra. */
+  .retiros-barra-sticky {
+    position: sticky; top: calc(var(--nav-h, 44px) - 1px); z-index: 20;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: white; border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 10px 14px; margin-bottom: 14px;
+    box-shadow: 0 3px 12px rgba(8,43,85,0.07);
+  }
+
+  /* Las dos tarjetas de celular se disuelven y sus hijos pasan a ser ítems
+     de la fila, así la barra es una sola línea sin duplicar el marcado. */
+  .retiros-barra-sticky > .card { display: contents; }
+
+  .retiros-barra { flex: 0 0 auto; flex-wrap: nowrap; }
+  .retiros-barra input[type="date"] {
+    flex: 0 0 auto; width: 148px; min-width: 0; padding: 9px 10px; font-size: 12px;
+  }
+  .retiros-btn-dia { min-height: 38px; padding: 9px 12px; }
+
+  .retiros-contador { flex: 0 0 auto; margin-left: 4px; font-size: 12px; }
+
+  .retiros-buscador {
+    flex: 1 1 190px; width: auto; min-width: 160px; max-width: 320px;
+    margin-top: 0; padding: 9px 12px; font-size: 12px;
+  }
+
+  .retiros-filtros { flex: 0 0 auto; margin-top: 0; }
+  .retiros-filtro { flex: 0 0 auto; padding: 10px 14px; }
+
+  /* El aviso del teclado ocupa su propio renglón dentro de la barra. */
+  .retiros-aviso-teclado { flex: 1 1 100%; margin-top: 2px; }
+
+  /* ── Dos columnas ────────────────────────────────────────────
+     ~70% la lista, ~30% ausentes y comentarios. minmax(0,…) para que una
+     fila larga de la tabla no estire la columna. */
+  .retiros-columnas {
+    display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
+    gap: 14px; align-items: start;
+  }
+  .retiros-col-lateral .card:last-child { margin-bottom: 0; }
+
+  /* ── Tabla ───────────────────────────────────────────────────
+     Filas de ~36px: con 167 personas, cada píxel de alto son tres personas
+     menos en pantalla. */
+  .retiros-tabla td { padding: 8px 10px; font-size: 11px; }
+  .retiros-tabla th { padding: 6px 10px; }
+  .retiros-td-nombre { white-space: normal; font-weight: 600; font-size: 12px; color: var(--navy); width: 34%; }
+  .retiros-td-plato  { white-space: normal; color: var(--text2); width: 24%; }
+  /* La observación fija ("no consume cerdo") en naranja, igual que en celular. */
+  .retiros-td-obs    { white-space: normal; color: var(--orange); font-weight: 600; width: 26%; }
+  .retiros-col-estado { width: 16%; white-space: nowrap; text-align: right; }
+
+  /* Zebra suave. Va antes que el hover propio para que el hover gane: el
+     `tr:hover td` global tiene la misma especificidad que el nth-child y
+     perdería por orden. */
+  .retiros-tabla tbody tr:nth-child(odd) td { background: rgba(8,43,85,0.022); }
+  .retiros-tabla tbody tr:hover td { background: var(--beige); }
+  .retiros-fila-enviando td { opacity: 0.5; }
+
+  .retiros-badge-ok {
+    display: inline-block; padding: 4px 10px; border-radius: 100px;
+    background: var(--green); color: white;
+    font-size: 9px; font-weight: 600; letter-spacing: 0.03em; white-space: nowrap;
+  }
+
+  /* Marcar y deshacer son controles DISTINTOS, no un botón que alterna: con
+     el mouse, un clic de más sobre un toggle borraría una entrega sin que
+     nadie se entere. */
+  .retiros-btn-tabla {
+    padding: 6px 12px; border: 1.5px solid var(--border2); border-radius: 8px;
+    background: white; font-family: var(--font); font-size: 10px; font-weight: 600;
+    color: var(--text2); cursor: pointer; white-space: nowrap; transition: all 0.15s;
+  }
+  .retiros-btn-tabla:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); color: white; }
+  .retiros-btn-tabla:disabled { opacity: 0.45; cursor: default; }
+
+  .retiros-deshacer {
+    margin-left: 7px; padding: 2px 3px; border: none; background: none;
+    font-family: var(--font); font-size: 9px; font-weight: 500;
+    color: var(--text3); cursor: pointer; text-decoration: underline;
+  }
+  .retiros-deshacer:hover:not(:disabled) { color: var(--orange); }
+  .retiros-deshacer:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
 }
