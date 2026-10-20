@@ -318,13 +318,26 @@
       return dt.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
-    // El filtro de estado y el buscador se combinan: "Faltan" + "gonz" son los
-    // González que todavía no retiraron.
-    function visiblesDeben() {
+    function textoBuscado() {
+      return document.getElementById('f-buscar').value.trim().toLowerCase();
+    }
+
+    // Coincidencias por NOMBRE sobre la lista completa, sin mirar el filtro de
+    // estado. Es lo que usa el Enter, y la diferencia importa: con el filtro
+    // en "Faltan" —el que van a tener puesto todo el día— quien ya retiró no
+    // está dibujado, así que buscarlo ahí daría "ningún nombre coincide" y el
+    // aviso de doble retiro no saldría nunca. Justo el caso que tiene que
+    // cubrir.
+    function coincidenciasPorTexto() {
       if (!DIA) return [];
-      const q = document.getElementById('f-buscar').value.trim().toLowerCase();
-      return DIA.deben_retirar.filter(p => {
-        if (q && !p.nombre_completo.toLowerCase().includes(q)) return false;
+      const q = textoBuscado();
+      return DIA.deben_retirar.filter(p => !q || p.nombre_completo.toLowerCase().includes(q));
+    }
+
+    // Lo que se DIBUJA en la tabla: el texto y además el filtro de estado.
+    // "Faltan" + "gonz" son los González que todavía no retiraron.
+    function visiblesDeben() {
+      return coincidenciasPorTexto().filter(p => {
         if (filtroEstado === 'faltan') return !p.retiro;
         if (filtroEstado === 'retiraron') return p.retiro;
         return true;
@@ -335,7 +348,7 @@
       if (!DIA) return;
       pintarContador();
 
-      const q = document.getElementById('f-buscar').value.trim().toLowerCase();
+      const q = textoBuscado();
       const deben = visiblesDeben();
       // Los ausentes no tienen estado de retiro, así que el filtro de estado no
       // les aplica: solo el buscador.
@@ -521,19 +534,21 @@
     function enterEnBuscador() {
       if (!ANCHA.matches || !DIA || !DIA.editable) return;
 
-      const visibles = visiblesDeben();
+      // A propósito sobre la lista COMPLETA y no sobre lo dibujado: el filtro
+      // de estado decide qué se ve, no a quién se puede buscar por nombre.
+      const coincidencias = coincidenciasPorTexto();
 
-      if (visibles.length !== 1) {
+      if (coincidencias.length !== 1) {
         avisoTeclado(
-          visibles.length === 0
-            ? 'Ningún nombre coincide con el buscador o el filtro.'
-            : `Hay ${visibles.length} coincidencias, hacé clic en la persona.`,
+          coincidencias.length === 0
+            ? 'Ningún nombre coincide con la búsqueda.'
+            : `Hay ${coincidencias.length} coincidencias, hacé clic en la persona.`,
           'retiros-aviso-nada'
         );
         return;
       }
 
-      const persona = visibles[0];
+      const persona = coincidencias[0];
 
       // Ya marcada: no se manda nada al servidor. El aviso es justamente para
       // que quien entrega sepa que esa vianda ya salió, y a qué hora.
