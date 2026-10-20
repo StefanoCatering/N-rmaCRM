@@ -97,6 +97,15 @@ function renderNav(activeHref) {
   if (!cont || !CURRENT_USER) return;
 
   const links = [];
+
+  // El rol 'comedor' tiene UNA pantalla y su cuenta, y nada más: el resto le
+  // daría 403 (la lista blanca de requireAuth en server.js). Sale temprano
+  // para no tener que negarlo en cada link de abajo.
+  if (CURRENT_USER.rol === 'comedor') {
+    pintarNav(cont, [['/retiros', 'Retiros'], ['/cuenta', 'Mi cuenta']], activeHref);
+    return;
+  }
+
   // Solo el operador: /inicio es requireAuth('operador'), para admin/visor daría 403.
   if (CURRENT_USER.rol === 'operador') {
     links.push(['/inicio', 'Inicio']);
@@ -116,9 +125,19 @@ function renderNav(activeHref) {
   if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor' || CURRENT_USER.gestiona_grilla) {
     links.push(['/grilla', 'Grilla']);
   }
+  // Los retiros del comedor los ven admin y visor además del rol comedor. Es
+  // la contracara de la grilla: la grilla dice qué se produce, los retiros
+  // dicen qué se entregó.
+  if (CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'visor') {
+    links.push(['/retiros', 'Retiros']);
+  }
   // Su propia cuenta la tiene cualquier usuario logueado, visor incluido.
   links.push(['/cuenta', 'Mi cuenta']);
 
+  pintarNav(cont, links, activeHref);
+}
+
+function pintarNav(cont, links, activeHref) {
   const linksHtml = links.map(([href, label]) => {
     const active = href === activeHref ? ' active' : '';
     return `<a class="nav-btn${active}" href="${href}">${label}</a>`;

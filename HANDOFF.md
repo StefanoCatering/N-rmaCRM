@@ -76,7 +76,8 @@ narma_crm/
 │   ├── entregas.js            # Fase 9: líneas → entregas concretas. Lo comparten el sync y el resumen
 │   ├── syncPedidos.js         # Espejado CRM → Narma Pedidos. Nunca hace fallar el guardado
 │   ├── resumen.js             # Fase 9: resumen del día + control contra pedidos_crm_detalle (solo lectura)
-│   └── grilla.js              # Fase 7: cálculo de totales, envío semanal, hoja del día
+│   ├── grilla.js              # Fase 7: cálculo de totales, envío semanal, hoja del día
+│   └── retiros.js             # Fase 10: quién retiró su vianda. La lista sale de la grilla, no se copia
 │
 ├── routes/
 │   ├── clientes.js            # /api/clientes/* (incluye /kpis, /alertas, /empresas)
@@ -84,9 +85,10 @@ narma_crm/
 │   ├── platos.js              # /api/platos (catálogo activo por categoría; ?incluir_general=1 trae todo)
 │   ├── grilla.js              # /api/grilla/* (fase 7)
 │   ├── resumen.js             # /api/resumen (fase 9)
+│   ├── retiros.js             # /api/retiros/* (fase 10)
 │   └── export.js              # /api/export (Excel: datos | historial | pedidos)
 │
-├── views/                     # HTML servidos por sendFile (14 vistas)
+├── views/                     # HTML servidos por sendFile (15 vistas)
 │   ├── login.html · 403.html
 │   ├── dashboard.html         # admin + visor
 │   ├── inicio.html            # operador
@@ -94,10 +96,11 @@ narma_crm/
 │   ├── pedidos.html · pedido-form.html · pedido-detalle.html
 │   ├── grilla.html · grilla-dia.html     # fase 7
 │   ├── cuenta.html            # fase 8 — cambio de contraseña propia (todos los roles)
-│   └── resumen.html           # fase 9 — resumen del día (los tres roles, solo lectura)
+│   ├── resumen.html           # fase 9 — resumen del día (los tres roles, solo lectura)
+│   └── retiros.html           # fase 10 — retiros en el comedor (admin, visor, comedor). Para celular
 │
 ├── public/
-│   ├── css/styles.css         # Estilos Närma. Incluye secciones GRILLA y RESUMEN, y reglas @media print
+│   ├── css/styles.css         # Estilos Närma. Incluye GRILLA, RESUMEN y RETIROS, y reglas @media print
 │   └── js/common.js           # api(), ensureSession(), renderNav(), labels, fmt*
 │
 ├── migrations/                # SQL que se corre A MANO en el SQL Editor de Supabase
@@ -106,7 +109,8 @@ narma_crm/
 │   ├── fase5_indices.sql               ✅ aplicada
 │   ├── fase6_pedidos_estructurados.sql ✅ aplicada
 │   ├── fase7_grilla_comedor.sql        ✅ aplicada
-│   └── fase8_auditoria_usuarios.sql    ✅ aplicada
+│   ├── fase8_auditoria_usuarios.sql    ✅ aplicada
+│   └── fase10_retiros_comedor.sql      ⏳ PENDIENTE (fase 10)
 │
 └── supabase/                  # Schema histórico (schema.sql es la base original)
 ```
@@ -120,10 +124,12 @@ Todas montadas bajo `requireAuth()` (JWT válido). Los permisos finos se aplican
 ### Auth (server.js)
 | Método | Ruta | Permiso |
 |---|---|---|
-| POST | `/api/login` | Público (rate limit 8/15min por IP). **302** a `/dashboard` o `/inicio`, setea cookie `narma_token` |
+| POST | `/api/login` | Público (rate limit 8/15min por IP). **302** a `/dashboard`, `/inicio` o `/retiros` según el rol, setea cookie `narma_token` |
 | POST | `/api/logout` | Autenticado |
 | GET | `/api/me` | Autenticado. `{ user: {id, username, rol, gestiona_grilla}, alertDays }` — todo sale de la base, no del JWT |
 | POST | `/api/cuenta/password` | Autenticado, **cualquier rol incluido visor** (rate limit 8/15min por IP, con contador propio). Cambia la contraseña del usuario logueado |
+
+> **El rol `comedor` pasa por una lista blanca dentro de `requireAuth`** (fase 10): solo llega a `GET /retiros`, `GET /cuenta`, `GET /api/me`, `POST /api/cuenta/password` y todo `/api/retiros/*`. **Cualquier otra ruta es 403** (JSON en `/api`, `403.html` en páginas) sin que haya que tocar endpoint por endpoint. Deniega por defecto a propósito: `requireEscritura` solo frena a `visor`, así que un rol nuevo pasaría por cualquier endpoint que no lo nombre, y también por el próximo que se agregue. Para abrirle algo nuevo hay que sumarlo a `RUTAS_COMEDOR` / `PREFIJOS_COMEDOR` en `server.js`.
 
 > **`requireAuth` lee la base en cada request** (fase 8): una consulta por id que trae `activo`, `rol` y `gestiona_grilla`. Si el usuario no existe o está desactivado, limpia la cookie y devuelve 401 (API) o redirige a `/login` (páginas). El **rol sale de la base**, así que cambiarlo aplica en el acto y no al vencer el token de 8 h.
 
@@ -171,6 +177,22 @@ Devuelve `{ resumen: { fecha, total, cocina, fuentes, entregas }, hoy }`:
 - `cocina` — `{ disponible, motivo }`. Si no se puede leer `pedidos_crm_detalle`, el resto del resumen se devuelve igual y la pantalla avisa que no está verificado.
 - `fuentes[]` — un bloque por fuente (`Grilla · <empresa>`, la empresa del cliente, o `Particulares`) con su total por plato y el detalle por cliente.
 
+### Retiros en el comedor (routes/retiros.js — fase 10)
+| Método | Ruta | Permiso |
+|---|---|---|
+| GET | `/api/retiros/dia?empresa=&fecha=` | **admin, visor, comedor** (el operador no entra) |
+| PUT | `/api/retiros/marca` | **admin, comedor** |
+| PUT | `/api/retiros/nota` | **admin, comedor** |
+
+Registro de **entrega**, no de producción: no toca pedidos, totales ni la grilla, y **no se sincroniza a Narma Pedidos**.
+
+- `empresa` por defecto: la **única activa** en `grilla_empresas` (hoy `UENO BANK`). Si hubiera más de una activa, pide que se indique cuál.
+- `fecha` por defecto: **hoy** en hora de Asunción. Rechaza con 400 las fechas futuras, los días no hábiles y las inválidas (`2026-02-31`).
+- La lista sale de `grilla.cargarSemana` + `grilla.platoEfectivo` — **la regla de quién come qué no se reimplementa**. Un ausente cargado a las 11 de la mañana desaparece de la lista en el acto.
+- Respuesta: `{ empresa, fecha, sin_servicio, motivo_sin_servicio, deben_retirar[], ausentes[], nota, totales, editable, puede_marcar, hoy }`. `plato_nombre` es la **etiqueta** de `platos.js`, igual que la hoja del día. **Sin cédula ni teléfono.**
+- `editable` = el usuario puede marcar **Y** la fecha es hoy o el **día hábil anterior** (desde un lunes, el viernes). Los días más viejos se ven y no se tocan.
+- Toda marca, desmarca y nota va a `grilla_auditoria` con `antes`/`despues`, en la **misma transacción** que el cambio.
+
 ### Grilla de comedor (routes/grilla.js — fase 7)
 | Método | Ruta | Permiso |
 |---|---|---|
@@ -186,26 +208,30 @@ Devuelve `{ resumen: { fecha, total, cocina, fuentes, entregas }, hoy }`:
 `GET /api/export?tipo=datos|historial|pedidos` — autenticado. **Excluye los pedidos `origen='grilla'`** de las hojas y de los promedios/totales de monto.
 
 ### Páginas (server.js)
-`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/cuenta` (cualquier usuario logueado), `/resumen` (cualquier usuario logueado — fase 9), `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`).
+`/` (redirect por rol), `/login`, `/dashboard` (admin/visor), `/inicio` (operador), `/clientes`, `/clientes/nuevo`, `/clientes/:id/editar`, `/clientes/:id`, `/pedidos`, `/pedidos/nuevo`, `/pedidos/:id/editar`, `/cuenta` (cualquier usuario logueado), `/resumen` (cualquier usuario logueado — fase 9), `/grilla` y `/grilla/dia` (admin, visor o `gestiona_grilla`), `/retiros` (admin, visor, comedor — fase 10).
 
 ---
 
 ## 6. Roles y permisos
 
-| Rol | Dashboard/KPIs | Ver clientes/pedidos | Crear/editar cliente | Crear pedido | Editar pago | Editar/cancelar pedido, líneas | Estado/seguimiento cliente | Ver grilla | Editar grilla |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **admin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **operador** | ❌ (va a `/inicio`) | ✅ | ✅ | ✅ | ✅ | ✅ (fase 8) | ❌ | solo con permiso | solo con permiso |
-| **visor** | ✅ (solo lectura) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (lectura) | ❌ |
+| Rol | Dashboard/KPIs | Ver clientes/pedidos | Crear/editar cliente | Crear pedido | Editar pago | Editar/cancelar pedido, líneas | Estado/seguimiento cliente | Ver grilla | Editar grilla | Ver retiros | Marcar retiros |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **admin** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **operador** | ❌ (va a `/inicio`) | ✅ | ✅ | ✅ | ✅ | ✅ (fase 8) | ❌ | solo con permiso | solo con permiso | ❌ | ❌ |
+| **visor** | ✅ (solo lectura) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (lectura) | ❌ | ✅ (lectura) | ❌ |
+| **comedor** (fase 10) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 
 - **`usuarios.gestiona_grilla` NO es un rol**: es un permiso aparte, en su propia columna. En producción lo tiene `Admin1`, que es **`operador`**. Editar la grilla depende solo de ese flag; ser admin no alcanza.
 - Se lee de la base en cada request de escritura (`usuarios.gestionaGrilla`), no del JWT: sacarle el permiso a alguien aplica en el acto y no cuando se le vence el token de 8 h.
 - Auth por JWT (8 h) en cookie `narma_token` (`httpOnly, secure, sameSite:lax`). El token solo dice **quién** es: `activo` y `rol` se leen de la base en cada request (fase 8).
 - **`usuarios.activo = false`** corta el acceso en el acto: el login responde 401 `Usuario desactivado`, y un request con un token todavía vigente queda sin cookie y afuera. Se desactiva, no se borra: el id está referenciado por `pedidos.recibido_por`/`verificado_por` y `grilla_celdas.updated_by`.
 - **Cada usuario cambia su propia contraseña** en `/cuenta` (visor incluido): pide la actual, exige 8 caracteres como mínimo y guarda un hash bcrypt. Nadie cambia la de otro desde la app.
+- **El rol `comedor` (fase 10) tiene UNA pantalla y su cuenta**: `/retiros` y `/cuenta`, nada más. Es la persona de atención del comedor del banco, que entrega las viandas y no trabaja en el CRM. El bloqueo es una **lista blanca** en `requireAuth` (ver la sección 5), no un permiso por endpoint: lo que no está en la lista es 403, incluidos los endpoints que todavía no existen. El login y `/` lo mandan a `/retiros`.
+- **El operador NO ve los retiros**: la entrega en el comedor no es parte de su trabajo, y la lista nominal de funcionarios del banco no tiene por qué estar a la vista de quien carga pedidos.
 - **El resumen del día (`/resumen`) lo ven los tres roles**, visor incluido: es solo lectura y no hay nada que escribir ahí. No tiene un permiso propio — es la misma información de producción que ya se ve en pedidos y en la grilla.
 
 **Usuarios en producción:** `Admin1` (operador, `gestiona_grilla` tras correr la fase 7), `Admin2` (operador), `Guadalupe` (admin), `Stefano` (admin), `Direccion` (visor).
+La fase 10 **no crea ningún usuario**: el del comedor (Matrix) hay que darlo de alta a mano con `rol = 'comedor'` **después** de correr la migración, que es la que amplía el CHECK.
 `seed.js` usa los mismos usernames con contraseñas ficticias — **no correrlo contra producción**.
 
 ---
@@ -215,7 +241,7 @@ Devuelve `{ resumen: { fecha, total, cocina, fuentes, entregas }, hoy }`:
 ### Base del CRM (`bjnwremoaooglpxrnzgi`)
 
 #### `usuarios`
-`id` · `username` UNIQUE · `password_hash` · `rol` CHECK IN (`operador`,`admin`,`visor`) · **`gestiona_grilla` BOOLEAN NOT NULL default false** (fase 7) · **`activo` BOOLEAN NOT NULL default true** (fase 8) · `created_at`
+`id` · `username` UNIQUE · `password_hash` · `rol` CHECK IN (`operador`,`admin`,`visor`,**`comedor`** ← fase 10) · **`gestiona_grilla` BOOLEAN NOT NULL default false** (fase 7) · **`activo` BOOLEAN NOT NULL default true** (fase 8) · `created_at`
 
 #### `clientes`
 `id` · `nombre_completo` · `cedula` UNIQUE · `email` · `telefono`/`telefono2`/`telefono3` · `observaciones` · `segmento` CHECK IN (`particular`,`empresa`,`embajador`) · `empresa` · `canal_origen` · `codigo_embajador` · `estado` · `fecha_ingreso` · `seguimiento_marcado`/`seguimiento_fecha` · **`tipo_envase` CHECK IN (`Narma`,`Venezia`) default `Venezia`** (fase 6) · `created_at`/`updated_at`
@@ -243,7 +269,12 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 - **`grilla_celdas`**: una diferencia por (`cliente_id`, `fecha`) UNIQUE. CHECK `num_nonnulls(plato_id, ausencia) = 1`. `ausencia` IN (`home_office`,`vacaciones`,`reposo`,`licencia`,`otro`). **Sin fila = plato base.**
 - **`grilla_sin_servicio`**: PK (`empresa`, `fecha`). Ese día no se produce nada para esa empresa.
 - **`grilla_general`**: PK (`empresa`, `fecha`, `plato_id`), `cantidad >= 0`. Ítems que no van por persona.
-- **`grilla_auditoria`**: log automático de toda escritura de la grilla (`tabla`, `clave`, `antes`/`despues` JSONB). Sin FK. El estado del último envío de una semana se lee de acá (`tabla='grilla_envio'`).
+- **`grilla_auditoria`**: log automático de toda escritura de la grilla (`tabla`, `clave`, `antes`/`despues` JSONB). Sin FK. El estado del último envío de una semana se lee de acá (`tabla='grilla_envio'`). **Fase 10**: también recibe `tabla='grilla_retiros'` y `tabla='grilla_retiros_notas'`.
+
+#### Fase 10
+- **`grilla_retiros`**: PK (`cliente_id`, `fecha`) · `marcado_por` FK→usuarios · `marcado_en`. **Que exista la fila = retiró**; desmarcar es **borrar** la fila, no guardar un `false` (no hay un tercer estado que distinguir de "todavía sin marcar"). `ON DELETE CASCADE` sobre el cliente: es un registro de entrega, no un log.
+- **`grilla_retiros_notas`**: PK (`empresa`, `fecha`) · `texto` · `updated_by` · `updated_at`. El comentario libre del día ("vino Fulano, no figura en la lista"), hasta 1000 caracteres. Texto vacío borra la fila.
+- **Ninguna de las dos guarda quién debe retirar**: eso sale siempre de `grilla_planes` + `grilla_celdas`, así que no hay dos listas que puedan quedar desfasadas.
 
 ### Base de Narma Pedidos (`rgppcvqoephcjjcnqwnz`)
 **`pedidos_crm_detalle`** — NO se migra desde este repo. Su contrato (columnas, NOT NULLs, UNIQUE `(crm_pedido_detalle_id, fecha_entrega)`) está documentado en la cabecera de `models/syncPedidos.js`. Si cambia allá, hay que acompañar el cambio acá.
@@ -258,6 +289,7 @@ Sin cambios desde la fase 3. Hasta 3 ubicaciones por cliente.
 | Clientes: CRUD, filtros, búsqueda, ficha, colaboradores por empresa, hasta 3 ubicaciones | ✅ |
 | Dashboard (admin/visor): KPIs, evolución 6 meses, ticket por segmento, alertas | ✅ |
 | Pedidos: alta, estado de pago, historial con filtros, export Excel | ✅ |
+| Retiros en el comedor (fase 10): marca diaria de entrega, rol `comedor` acotado a su pantalla | ✅ (falta correr la migración) |
 | Pedidos: edición y cancelación con auditoría y motivo obligatorio | ✅ (fase 3; desde la fase 8 también el operador, visor no) |
 | Hardening: helmet + CSP, rate limit, índices | ✅ (fase 5) |
 | Pedidos estructurados: catálogo de platos, líneas puntuales/recurrentes, excepciones por fecha | ✅ (fase 6) |
@@ -391,3 +423,9 @@ No hay tests en el repo y la base de dev es la de prod, así que lo que se usó 
 1. **Contra producción, solo con SELECT**: se armó el resumen del 26/10/2026 con `models/resumen.js` y se comparó, clave por clave, contra lo que resuelve `syncPedidos.resolverFilas()` pedido por pedido, y contra el agrupado de `pedidos_crm_detalle` de la base de cocina. Los tres lados dieron lo mismo (182 viandas: 167 Narma + 15 Venezia).
 2. **Contra el Postgres descartable**, con los casos que producción todavía no tiene: líneas recurrentes con excepciones (otro plato, otra cantidad, `omitir`), fin de semana, pedidos y líneas canceladas, override de envase, ítems de `General` en un pedido normal. Se corrió el sync de verdad contra `pedidos_test` y después se comprobó que el control del resumen dice "coincide"; recién entonces se alteró a mano una fila **de la base de prueba** para ver que el descuadre se detecte.
 3. **QA visual con un arnés que stubbea `/api/me` y `/api/resumen`**: así se ven los cuatro estados de la pantalla (coincide, descuadre, cocina ilegible, día vacío) sin autenticarse contra producción.
+
+**Cómo se verificó la fase 10** (la misma receta, sin tocar producción en ningún momento):
+1. **Un `crm_test` armado desde el repo**: `supabase/schema.sql` + los `schema_*` + las migraciones de la 4 a la 8 + `fase10_retiros_comedor.sql`. La migración de la fase 10 se corrió **tres veces seguidas** para verificar que es idempotente, y después se chequearon contra `pg_constraint` / `information_schema` el CHECK del rol, las PK, las FK (`ON DELETE CASCADE` en `grilla_retiros.cliente_id`) y que las dos tablas nuevas quedaran con RLS habilitado.
+2. **El `server.js` de verdad, por HTTP, con un usuario de cada rol** (`comedor`, `admin`, `visor`, `operador`) y un comedor sembrado que cubre todos los casos: plato base, plato cambiado, observación fija, ausente, alta posterior, baja ya cumplida y alguien de otra empresa. **129 chequeos, todos en verde.** Incluye el bloqueo del rol `comedor` ruta por ruta (y variantes como `/RETIROS` o `/retiros/`, que Express rutea igual), las fechas rechazadas, las marcas sobre ausentes y fuera de plan, la auditoría con `antes`/`despues`, y que marcar un retiro **no cree ningún pedido ni ningún intento de sync**.
+3. **QA visual con un arnés que stubbea `/api/me` y `/api/retiros/*`**: se vieron en el navegador, a 375 px y en desktop, los estados normal, solo lectura por fecha cerrada, solo lectura por ser visor, día sin servicio y día vacío; y se comprobó a mano el buscador, el salto de fin de semana al moverse de día, y que una marca rechazada por el servidor **revierta la fila y muestre el error**.
+4. **La guarda estática del pooler** (punto de arriba) corre dentro de la misma suite: los archivos nuevos no usan advisory locks ni `SET SESSION`.
