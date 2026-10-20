@@ -20,18 +20,17 @@
     </div>
   </div>
 
-  <!-- Modal cambiar estado (solo admin) -->
+  <!-- Modal activar / desactivar cliente (admin y operador).
+       Reemplaza al viejo selector de cuatro estados: el cambio es un
+       interruptor de dos posiciones y el motivo es obligatorio porque queda
+       auditado (fase 11). -->
   <div id="modal-estado" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
-    <div class="card" style="max-width:360px;width:100%;">
-      <div class="card-title">cambiar estado del cliente</div>
-      <div class="form-group">
-        <label class="form-label">Nuevo estado</label>
-        <select id="modal-estado-select">
-          <option value="activo">Activo</option>
-          <option value="pausado">Pausado</option>
-          <option value="inactivo">Inactivo</option>
-          <option value="baja">Baja</option>
-        </select>
+    <div class="card" style="max-width:380px;width:100%;">
+      <div class="card-title" id="modal-estado-titulo">desactivar cliente</div>
+      <div class="nota" id="modal-estado-nota"></div>
+      <div class="form-group mt-8">
+        <label class="form-label">Motivo</label>
+        <textarea id="modal-estado-motivo" placeholder="Por qué se hace este cambio..."></textarea>
       </div>
       <div id="modal-estado-error" class="form-error hidden"></div>
       <div class="btn-row">
@@ -119,6 +118,10 @@
   <script>
     const clienteId = window.location.pathname.split('/').pop();
     let clienteActual = null;
+    // Aviso que devuelve el backend al DESACTIVAR: qué quedó cargado y sigue
+    // vigente. Se guarda acá porque la ficha se vuelve a dibujar entera
+    // después del cambio y el aviso tiene que sobrevivir a ese redibujado.
+    let avisoEstado = null;
 
     (async function () {
       await ensureSession();
@@ -285,13 +288,46 @@
         return;
       }
       clienteActual = data.cliente;
-      renderFicha(data.cliente, data.pedidos, data.colaboradores || []);
+      // El historial de estado no corta la ficha si falla: es un dato de
+      // contexto, no el contenido de la pantalla.
+      let auditoria = [];
+      try {
+        auditoria = (await api(`/api/clientes/${clienteId}/auditoria`)).auditoria || [];
+      } catch (e) { auditoria = null; }
+      renderFicha(data.cliente, data.pedidos, data.colaboradores || [], auditoria);
     }
 
-    function renderFicha(c, pedidos, colaboradores) {
+    // El aviso de lo que quedó pendiente al desactivar. NO se canceló nada:
+    // el texto lo dice y manda a cancelar el pedido o a dar de baja el plan
+    // de comedor, que son decisiones de ATC y no efectos de un botón.
+    function bannerAviso() {
+      if (!avisoEstado) return '';
+      const pedidos = avisoEstado.pedidos || [];
+      if (!pedidos.length && !avisoEstado.plan_grilla) return '';
+
+      const links = pedidos
+        .map(id => `<a href="/pedidos/${id}/editar">#${id}</a>`)
+        .join(', ');
+      const partes = [];
+      if (pedidos.length) {
+        partes.push(`${pedidos.length} pedido${pedidos.length === 1 ? '' : 's'} con entregas pendientes (${links})`);
+      }
+      if (avisoEstado.plan_grilla) partes.push('un plan en la grilla de comedor');
+
+      return `
+        <div class="alerta-banner">
+          ⚠️ Este cliente tiene ${partes.join(' y ')}.
+          No se canceló nada: cancelalos o dale de baja en la grilla si corresponde.
+        </div>`;
+    }
+
+    function renderFicha(c, pedidos, colaboradores, auditoria) {
       const enAlerta = c.dias_sin_pedir !== null && c.dias_sin_pedir > window.ALERT_DAYS;
-      const esAdmin = CURRENT_USER.rol === 'admin';
       const puedeEscribir = CURRENT_USER.rol !== 'visor';
+      // Activar / desactivar lo hace ATC, no solo el admin (fase 11). Visor no
+      // escribe, y el rol comedor no llega a esta pantalla.
+      const puedeCambiarEstado = CURRENT_USER.rol === 'admin' || CURRENT_USER.rol === 'operador';
+      const estaActivo = c.estado === 'activo';
 
       document.getElementById('ficha-cont').innerHTML = `
         <div class="cliente-header-card">
@@ -302,6 +338,8 @@
           </div>
           <div>${badgeEstado(c.estado)}</div>
         </div>
+
+        ${bannerAviso()}
 
         ${enAlerta ? `
           <div class="alerta-banner">
@@ -327,11 +365,26 @@
             ${c.telefono3 ? `<div class="cliente-info-item"><span class="form-label">Teléfono 3</span><div class="cliente-info-value">${escapeHtml(c.telefono3)}</div></div>` : ''}
             <div class="cliente-info-item"><span class="form-label">Fecha de ingreso</span><div class="cliente-info-value">${fmtFecha(c.fecha_ingreso)}</div></div>
           </div>
-          ${puedeEscribir || esAdmin ? `
+          ${puedeEscribir || puedeCambiarEstado ? `
           <div class="btn-row">
             ${puedeEscribir ? `<a href="/clientes/${c.id}/editar" class="btn-secondary">Editar</a>` : ''}
-            ${esAdmin ? `<button class="btn-secondary" id="btn-cambiar-estado">Cambiar estado</button>` : ''}
+            ${puedeCambiarEstado ? `<button class="btn-secondary" id="btn-cambiar-estado">${estaActivo ? 'Desactivar' : 'Activar'} cliente</button>` : ''}
           </div>` : ''}
+        </div>
+
+        <div class="card">
+          <div class="card-title">historial de estado</div>
+          ${auditoria === null
+            ? '<div class="empty-state">No se pudo cargar el historial de estado.</div>'
+            : (auditoria.length ? auditoria.map(a => `
+              <div style="padding:8px 0;border-bottom:1px solid rgba(8,43,85,0.08);font-size:11px;">
+                <span class="text-muted">${fmtFecha(a.fecha)}</span>
+                · <strong>${escapeHtml(a.usuario)}</strong>
+                · ${a.estado_antes ? badgeEstado(a.estado_antes) : '<span class="text-muted">—</span>'}
+                → ${a.estado_despues ? badgeEstado(a.estado_despues) : '<span class="text-muted">—</span>'}
+                ${a.motivo ? `<div class="mt-8">${escapeHtml(a.motivo)}</div>` : ''}
+              </div>
+            `).join('') : '<div class="empty-state">Este cliente no registra cambios de estado.</div>')}
         </div>
 
         <div class="card">
@@ -439,13 +492,7 @@
       `;
 
       const btnEstado = document.getElementById('btn-cambiar-estado');
-      if (btnEstado) {
-        btnEstado.addEventListener('click', () => {
-          document.getElementById('modal-estado-select').value = c.estado;
-          document.getElementById('modal-estado-error').classList.add('hidden');
-          document.getElementById('modal-estado').classList.remove('hidden');
-        });
-      }
+      if (btnEstado) btnEstado.addEventListener('click', () => abrirModalEstado(estaActivo));
 
       document.querySelectorAll('.btn-editar-pago').forEach(btn => {
         btn.addEventListener('click', () => abrirModalPago(btn.dataset));
@@ -458,14 +505,42 @@
       });
     }
 
+    // estadoDestino: a dónde va el cliente. Un cliente activo se desactiva;
+    // cualquier otro estado —inactivo, y también los históricos 'pausado' y
+    // 'baja', que hoy no tiene ningún cliente— se activa.
+    let estadoDestino = 'inactivo';
+
+    function abrirModalEstado(estaActivo) {
+      estadoDestino = estaActivo ? 'inactivo' : 'activo';
+      document.getElementById('modal-estado-titulo').textContent =
+        estaActivo ? 'desactivar cliente' : 'activar cliente';
+      document.getElementById('modal-estado-nota').textContent = estaActivo
+        ? 'El cliente deja de recibir pedidos nuevos. Lo que ya está cargado no se cancela.'
+        : 'El cliente vuelve a poder recibir pedidos.';
+      document.getElementById('modal-estado-motivo').value = '';
+      document.getElementById('modal-estado-error').classList.add('hidden');
+      document.getElementById('modal-estado').classList.remove('hidden');
+      document.getElementById('modal-estado-motivo').focus();
+    }
+
     async function confirmarCambioEstado() {
-      const estado = document.getElementById('modal-estado-select').value;
+      const motivo = document.getElementById('modal-estado-motivo').value.trim();
       const errorBox = document.getElementById('modal-estado-error');
       const btn = document.getElementById('modal-estado-confirmar');
       errorBox.classList.add('hidden');
+
+      if (!motivo) {
+        errorBox.textContent = 'El motivo es requerido.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
       btn.disabled = true;
       try {
-        await api(`/api/clientes/${clienteId}/estado`, { method: 'PUT', body: { estado } });
+        const r = await api(`/api/clientes/${clienteId}/estado`, {
+          method: 'PUT', body: { estado: estadoDestino, motivo },
+        });
+        avisoEstado = r.aviso || null;
         document.getElementById('modal-estado').classList.add('hidden');
         await cargarFicha();
       } catch (e) {

@@ -155,12 +155,87 @@ async function listColaboradores(empresa, excludeId) {
   return result.rows;
 }
 
-async function updateEstado(id, estado) {
-  await pool.query(`
-    UPDATE clientes SET estado = $1, updated_at = NOW()
-    WHERE id = $2
-  `, [estado, id]);
+// Cambia el estado del cliente y registra el movimiento en clientes_auditoria
+// — las dos cosas en UNA transacción, para que no pueda quedar un cliente
+// desactivado sin constancia de quién lo desactivó y por qué (mismo criterio
+// que updatePago con pedidos_auditoria, fase 8).
+//
+// estadoAntes se recibe en lugar de releerlo acá: lo trae el endpoint, que ya
+// cargó el cliente para validar el cambio.
+async function updateEstado(id, { estado, estado_antes, motivo, usuario }) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query(`
+      UPDATE clientes SET estado = $1, updated_at = NOW()
+      WHERE id = $2
+    `, [estado, id]);
+
+    await client.query(`
+      INSERT INTO clientes_auditoria
+        (cliente_id, accion, usuario, estado_antes, estado_despues, motivo)
+      VALUES ($1, 'cambio_estado', $2, $3, $4, $5)
+    `, [id, usuario, estado_antes, estado, motivo]);
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
   return getById(id);
+}
+
+// Historial de cambios de estado de un cliente, más reciente primero.
+async function listAuditoria(clienteId) {
+  const r = await pool.query(
+    'SELECT * FROM clientes_auditoria WHERE cliente_id = $1 ORDER BY fecha DESC, id DESC',
+    [clienteId]
+  );
+  return r.rows;
+}
+
+// Lo que quedaría colgado si se desactiva a este cliente. NO cancela ni da de
+// baja nada: desactivar es una decisión administrativa y qué hacer con las
+// entregas que ya están cargadas lo decide ATC caso por caso. La respuesta del
+// endpoint lo devuelve como aviso para que esa decisión sea informada.
+//
+// hoy es la fecha de Asunción (detalle.hoyISO), la misma que usa la grilla:
+// con new Date() a secas, a partir de las 21:00 el servidor en UTC ya estaría
+// en el día siguiente y un pedido de hoy no aparecería en el aviso.
+async function pendientesAlDesactivar(id, hoy) {
+  // Una línea viva cuya entrega cae de hoy en adelante: puntual por su
+  // fecha_entrega, recurrente por el final de su rango (una recurrente que
+  // termina hoy todavía entrega hoy).
+  //
+  // Mira las LÍNEAS, no la cabecera: los pedidos sin líneas son los 765
+  // anteriores a la fase 6 y su ventana de entrega ya pasó hace meses.
+  const r = await pool.query(`
+    SELECT DISTINCT p.id
+    FROM pedidos p
+    JOIN pedido_detalle d ON d.pedido_id = p.id AND d.cancelado = false
+    WHERE p.cliente_id = $1
+      AND p.cancelado = false
+      AND (
+        (d.modo = 'puntual'    AND d.fecha_entrega >= $2) OR
+        (d.modo = 'recurrente' AND d.fecha_hasta   >= $2)
+      )
+    ORDER BY p.id ASC
+  `, [id, hoy]);
+
+  // Plan de comedor vigente (fase 7). fecha_baja es EXCLUSIVA —el primer día
+  // que ya NO come—, así que un plan con fecha_baja = hoy ya no está vigente.
+  const plan = await pool.query(`
+    SELECT 1 FROM grilla_planes
+    WHERE cliente_id = $1 AND (fecha_baja IS NULL OR fecha_baja > $2)
+  `, [id, hoy]);
+
+  return {
+    pedidos: r.rows.map(row => row.id),
+    plan_grilla: plan.rows.length > 0,
+  };
 }
 
 // Marca el seguimiento de un cliente en alerta (persiste en la base con la fecha actual).
@@ -270,6 +345,8 @@ module.exports = {
   create,
   update,
   updateEstado,
+  listAuditoria,
+  pendientesAlDesactivar,
   marcarSeguimiento,
   listEmpresas,
   listColaboradores,

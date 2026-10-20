@@ -132,6 +132,12 @@
     let clienteSeleccionado = null;
     let CATALOGO_PLATOS = [];
 
+    // Un cliente que no está activo no recibe pedidos nuevos (fase 11). El
+    // buscador ya no los ofrece; esto cubre el caso de abrir la pantalla con
+    // ?cliente_id= desde la ficha de uno inactivo.
+    const MSG_CLIENTE_INACTIVO = 'El cliente está inactivo: activalo antes de cargarle un pedido.';
+    let clienteInactivo = false;
+
     (async function () {
       await ensureSession();
       renderNav('/clientes');
@@ -152,6 +158,7 @@
         clienteSeleccionado = null;
         document.getElementById('f-cliente-id').value = '';
         document.getElementById('cliente-seleccionado').classList.add('hidden');
+        marcarEstadoCliente(null);
         actualizarOpcionCortesia();
         actualizarEtiquetasEnvase();
         clearTimeout(timerBuscar);
@@ -211,8 +218,10 @@
       if (!esEmbajador && selMedioPago.value === 'cortesia') selMedioPago.value = '';
     }
 
+    // solo_activos=1: el buscador no ofrece clientes a los que el POST le va a
+    // rechazar el pedido (fase 11).
     async function buscarClientes(q) {
-      const { clientes } = await api('/api/clientes?q=' + encodeURIComponent(q));
+      const { clientes } = await api('/api/clientes?solo_activos=1&q=' + encodeURIComponent(q));
       const cont = document.getElementById('cliente-resultados');
       if (!clientes.length) {
         cont.innerHTML = '<div class="empty-state" style="padding:10px;">Sin resultados.</div>';
@@ -272,8 +281,9 @@
             <select class="l-plato"><option value="">— Elegir —</option>${opcionesPlatos()}</select>
           </div>
           <div class="form-group">
-            <label class="form-label">Cantidad</label>
+            <label class="form-label l-cantidad-label">Cantidad</label>
             <input type="number" class="l-cantidad" min="1" step="1" placeholder="Ej: 10"/>
+            <div class="nota mt-8 l-total hidden"></div>
           </div>
         </div>
         <div class="form-row">
@@ -315,10 +325,34 @@
       `;
 
       const selModo = div.querySelector('.l-modo');
+
+      // La cantidad de una línea recurrente es POR DÍA: se repite en cada día
+      // hábil del rango. La etiqueta lo dice y el total se calcula en vivo,
+      // porque "10" en un rango de un mes son 220 viandas y no 10 — es el
+      // malentendido que hay que evitar antes de guardar, no después.
+      function refrescarCantidadPorDia() {
+        const esRecurrente = selModo.value === 'recurrente';
+        div.querySelector('.l-cantidad-label').textContent = esRecurrente ? 'Cantidad por día' : 'Cantidad';
+        const box = div.querySelector('.l-total');
+        const texto = esRecurrente
+          ? textoTotalRecurrente(
+            div.querySelector('.l-fecha-desde').value,
+            div.querySelector('.l-fecha-hasta').value,
+            div.querySelector('.l-cantidad').value
+          )
+          : '';
+        box.textContent = texto;
+        box.classList.toggle('hidden', !texto);
+      }
+
       selModo.addEventListener('change', () => {
         const esRecurrente = selModo.value === 'recurrente';
         div.querySelector('.l-grupo-puntual').classList.toggle('hidden', esRecurrente);
         div.querySelector('.l-grupo-recurrente').classList.toggle('hidden', !esRecurrente);
+        refrescarCantidadPorDia();
+      });
+      ['.l-cantidad', '.l-fecha-desde', '.l-fecha-hasta'].forEach(sel => {
+        div.querySelector(sel).addEventListener('input', refrescarCantidadPorDia);
       });
       div.querySelector('.l-quitar').addEventListener('click', () => div.remove());
 
@@ -376,8 +410,25 @@
       const sel = document.getElementById('cliente-seleccionado');
       sel.textContent = `Cliente seleccionado: ${cliente.nombre_completo} (${cliente.cedula})`;
       sel.classList.remove('hidden');
+      marcarEstadoCliente(cliente);
       actualizarOpcionCortesia();
       actualizarEtiquetasEnvase();
+    }
+
+    // Avisa y bloquea el guardado cuando el cliente elegido no está activo, en
+    // lugar de dejar cargar todo el pedido para que el POST lo rechace al
+    // final. Se muestra el cliente igual: quien abrió la pantalla necesita ver
+    // de quién se trata para ir a activarlo.
+    function marcarEstadoCliente(cliente) {
+      clienteInactivo = !!cliente && cliente.estado !== 'activo';
+      const errorBox = document.getElementById('form-error');
+      if (clienteInactivo) {
+        errorBox.textContent = MSG_CLIENTE_INACTIVO;
+        errorBox.classList.remove('hidden');
+      } else if (errorBox.textContent === MSG_CLIENTE_INACTIVO) {
+        errorBox.classList.add('hidden');
+      }
+      document.getElementById('btn-guardar').disabled = clienteInactivo;
     }
 
     async function guardar() {
@@ -386,6 +437,12 @@
 
       if (!clienteSeleccionado) {
         errorBox.textContent = 'Buscá y seleccioná un cliente.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      if (clienteInactivo) {
+        errorBox.textContent = MSG_CLIENTE_INACTIVO;
         errorBox.classList.remove('hidden');
         return;
       }

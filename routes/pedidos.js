@@ -151,13 +151,17 @@ async function cargarLinea(pedidoId, lineaId) {
 router.get('/', async (req, res, next) => {
   try {
     const {
-      cliente_id, fecha_desde, fecha_hasta, estado,
+      cliente_id, fecha_desde, fecha_hasta, fecha_tipo, estado,
       estado_pago, tipo_vianda, segmento, canal_origen,
     } = req.query;
     const filtros = {};
     if (cliente_id && Number(cliente_id)) filtros.cliente_id = Number(cliente_id);
     if (fecha_desde && /^\d{4}-\d{2}-\d{2}$/.test(fecha_desde)) filtros.fecha_desde = fecha_desde;
     if (fecha_hasta && /^\d{4}-\d{2}-\d{2}$/.test(fecha_hasta)) filtros.fecha_hasta = fecha_hasta;
+    // Sobre qué fecha pesan fecha_desde/fecha_hasta. Solo se reenvía el valor
+    // válido 'entrega'; cualquier otra cosa deja el default del modelo, que es
+    // filtrar por fecha de carga como se hacía hasta ahora.
+    if (fecha_tipo === 'entrega') filtros.fecha_tipo = 'entrega';
     if (estado && ESTADOS_CLIENTE.includes(estado)) filtros.estado = estado;
     if (estado_pago && ESTADOS_PAGO.includes(estado_pago)) filtros.estado_pago = estado_pago;
     if (tipo_vianda && TIPOS_VIANDA_FILTRO.includes(tipo_vianda)) filtros.tipo_vianda = tipo_vianda;
@@ -175,7 +179,15 @@ router.post('/', requireEscritura, async (req, res, next) => {
 
     const cliente_id = Number(body.cliente_id);
     const clienteObj = cliente_id ? await clientes.getById(cliente_id) : null;
-    if (!cliente_id || !clienteObj) errores.push('Cliente inválido');
+    // Un cliente que no está activo no recibe pedidos NUEVOS (fase 11).
+    // Editar y cancelar los que ya tiene sigue permitido a propósito:
+    // desactivar a alguien es justo el momento en que ATC necesita entrar a
+    // cancelar lo que quedó cargado.
+    if (!cliente_id || !clienteObj) {
+      errores.push('Cliente inválido');
+    } else if (clienteObj.estado !== 'activo') {
+      errores.push('El cliente está inactivo: activalo antes de cargarle un pedido');
+    }
 
     const fecha_pedido = String(body.fecha_pedido || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha_pedido)) errores.push('Fecha de pedido inválida (formato YYYY-MM-DD)');
