@@ -14,9 +14,26 @@
       <div class="card" style="margin-top:24px;">
         <div class="card-title">acceso restringido</div>
         <p style="font-size:12px;color:var(--text2);margin-bottom:14px;">No tenés permisos para ver esta sección.</p>
-        <a href="/clientes" class="btn-primary btn-block">Volver a clientes</a>
+        <!-- El destino depende del rol: para el rol 'comedor', /clientes es
+             otro 403 y el botón sería un círculo. /api/me es lo único de la
+             API que todos los roles pueden consultar. -->
+        <a href="/clientes" class="btn-primary btn-block" id="btn-volver">Volver</a>
       </div>
     </div>
   </div>
+
+  <script>
+    (async function () {
+      const btn = document.getElementById('btn-volver');
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) return;
+        const rol = ((await res.json()).user || {}).rol;
+        if (rol === 'comedor') { btn.href = '/retiros'; btn.textContent = 'Volver a retiros'; }
+        else if (rol === 'operador') { btn.textContent = 'Volver a clientes'; }
+        else { btn.href = '/dashboard'; btn.textContent = 'Volver al dashboard'; }
+      } catch (e) { /* sin red: queda el destino por defecto */ }
+    })();
+  </script>
 </body>
 </html>

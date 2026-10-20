@@ -13,6 +13,7 @@ const pedidosRouter  = require('./routes/pedidos');
 const platosRouter   = require('./routes/platos');
 const grillaRouter   = require('./routes/grilla');
 const resumenRouter  = require('./routes/resumen');
+const retirosRouter  = require('./routes/retiros');
 const exportRouter   = require('./routes/export');
 
 // Validación de arranque: JWT_SECRET es obligatorio
@@ -52,6 +53,55 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── El rol 'comedor' y su lista blanca ────────────────────────────
+//
+// La persona de atención del comedor del banco (fase 10) entrega las viandas y
+// no hace nada más en el CRM: no ve clientes, no ve pedidos, no ve la grilla
+// ni el dashboard. Su rol tiene UNA pantalla y su propia cuenta.
+//
+// El bloqueo es una lista blanca y no una lista negra, y va acá adentro de
+// requireAuth en lugar de en cada endpoint, por un motivo concreto: hasta la
+// fase 9 el único freno por rol era requireEscritura, que solo mira si sos
+// 'visor'. Con un rol nuevo, cualquier endpoint de escritura que no lo nombre
+// explícitamente lo dejaría pasar — y el próximo endpoint que se agregue
+// también. Denegando por defecto, un endpoint nuevo queda cerrado para
+// comedor hasta que alguien decida lo contrario y lo agregue a esta lista.
+//
+// Lo que sí puede: su pantalla, su API, su cuenta, y /api/me (del que salen el
+// nav y la sesión en todas las vistas).
+
+const RUTAS_COMEDOR = [
+  ['GET',  '/retiros'],
+  ['GET',  '/cuenta'],
+  ['GET',  '/api/me'],
+  ['POST', '/api/cuenta/password'],
+];
+
+// Toda la API de retiros, cualquier método: es la pantalla de esta persona.
+const PREFIJOS_COMEDOR = ['/api/retiros'];
+
+// La ruta pedida, normalizada para comparar: sin query string, sin barra
+// final y en minúsculas. Express rutea sin distinguir mayúsculas y aceptando
+// la barra final, así que la lista blanca tiene que hacer lo mismo — si no,
+// '/Retiros/' quedaría fuera y le cerraría su propia pantalla.
+function rutaNormalizada(originalUrl) {
+  const sinQuery = String(originalUrl).split('?')[0].toLowerCase();
+  return sinQuery.length > 1 ? sinQuery.replace(/\/+$/, '') : sinQuery;
+}
+
+function comedorPuedeEntrar(method, ruta) {
+  if (RUTAS_COMEDOR.some(([m, r]) => m === method && r === ruta)) return true;
+  return PREFIJOS_COMEDOR.some(p => ruta === p || ruta.startsWith(p + '/'));
+}
+
+// A dónde se manda a cada rol después del login. Para comedor, /inicio (el
+// default histórico) sería un 403: su única pantalla es /retiros.
+function destinoPorRol(rol) {
+  if (rol === 'comedor') return '/retiros';
+  if (rol === 'admin' || rol === 'visor') return '/dashboard';
+  return '/inicio';
+}
 
 // ── Middleware de autenticación / autorización ────────────────────
 // requireAuth(rol?)
@@ -116,6 +166,16 @@ function requireAuth(rol) {
         '| rol requerido:', rol || 'cualquiera',
         '| path:', req.originalUrl
       );
+
+      // El rol 'comedor' solo pasa a lo que está en su lista blanca. Va ANTES
+      // del chequeo de rol de cada ruta porque no depende de él: la mayoría de
+      // las páginas y endpoints se montan con requireAuth() sin rol, y sin
+      // esto quedarían abiertos.
+      if (req.user.rol === 'comedor' && !comedorPuedeEntrar(req.method, rutaNormalizada(req.originalUrl))) {
+        console.log('[requireAuth] FORBIDDEN comedor | user:', req.user.username, '| path:', req.originalUrl);
+        if (isApi) return res.status(403).json({ error: 'No autorizado' });
+        return res.status(403).sendFile(path.join(__dirname, 'views', '403.html'));
+      }
 
       // rol puede ser string ('admin'), array (['admin','visor']), o falsy (cualquiera)
       const rolesPermitidos = Array.isArray(rol) ? rol : (rol ? [rol] : null);
@@ -190,7 +250,7 @@ app.post('/api/login', loginLimiter, async (req, res, next) => {
       maxAge: 8 * 60 * 60 * 1000, // 8 horas
     });
 
-    const dest = (usuario.rol === 'admin' || usuario.rol === 'visor') ? '/dashboard' : '/inicio';
+    const dest = destinoPorRol(usuario.rol);
     console.log('[login] JWT generado | user:', usuario.username, '| rol:', usuario.rol, '| redirect ->', dest);
     res.redirect(dest);
   } catch (err) { next(err); }
@@ -263,7 +323,7 @@ app.get('/', (req, res) => {
   if (!token) return res.redirect('/login');
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    return res.redirect((payload.rol === 'admin' || payload.rol === 'visor') ? '/dashboard' : '/inicio');
+    return res.redirect(destinoPorRol(payload.rol));
   } catch {
     res.clearCookie('narma_token', { httpOnly: true, secure: true, sameSite: 'lax' });
     return res.redirect('/login');
@@ -275,7 +335,7 @@ app.get('/login', (req, res) => {
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
-      return res.redirect((payload.rol === 'admin' || payload.rol === 'visor') ? '/dashboard' : '/inicio');
+      return res.redirect(destinoPorRol(payload.rol));
     } catch { /* token inválido → mostrar login */ }
   }
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
@@ -318,6 +378,12 @@ app.get('/grilla', requireAuth(), requireVistaGrilla, view('grilla.html'));
 // Es de SOLO LECTURA y la ven los tres roles — admin, operador y visor.
 app.get('/resumen', requireAuth(), view('resumen.html'));
 
+// Retiros en el comedor (fase 10): la planilla con la que la persona de
+// atención del comedor del banco marca quién retiró su vianda. La ven admin,
+// visor y comedor; marcan admin y comedor. El operador no entra: la entrega en
+// el comedor no es parte de su trabajo (ver routes/retiros.js).
+app.get('/retiros', requireAuth(['admin', 'visor', 'comedor']), view('retiros.html'));
+
 // ── API de negocio ────────────────────────────────────────────────
 
 app.use('/api/clientes', requireAuth(), clientesRouter);
@@ -325,6 +391,7 @@ app.use('/api/pedidos',  requireAuth(), pedidosRouter);
 app.use('/api/platos',   requireAuth(), platosRouter);
 app.use('/api/grilla',   requireAuth(), grillaRouter);
 app.use('/api/resumen',  requireAuth(), resumenRouter);
+app.use('/api/retiros',  requireAuth(), retirosRouter);
 app.use('/api/export',   requireAuth(), exportRouter);
 
 app.use((req, res) => {

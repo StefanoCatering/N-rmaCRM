@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>närma · crm · retiros</title>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/css/styles.css"/>
+</head>
+<body>
+  <div class="app">
+    <div class="nav" id="nav"></div>
+
+    <!-- Una sola columna y angosta a propósito: esto se usa en un celular o
+         una tablet, de pie, en el comedor del banco. -->
+    <div class="view" style="max-width:640px;margin:0 auto;">
+      <div class="view-header">
+        <div>
+          <div class="view-header-title">retiros</div>
+          <div class="view-header-sub" id="sub-header">Cargando...</div>
+        </div>
+      </div>
+
+      <div class="nota">
+        Quién retiró su vianda, día por día. Es un registro de entrega: no cambia los pedidos, los
+        totales ni la grilla, y cocina no lo ve.
+      </div>
+
+      <div id="error-global" class="form-error hidden"></div>
+      <div id="aviso-sin-servicio" class="alerta-banner hidden"></div>
+      <div id="aviso-solo-lectura" class="retiros-aviso hidden"></div>
+
+      <div class="card">
+        <div class="retiros-barra">
+          <button class="retiros-btn-dia" id="btn-prev">← Día anterior</button>
+          <input type="date" id="f-fecha" title="Día"/>
+          <button class="retiros-btn-dia" id="btn-next">Día siguiente →</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="retiros-contador" id="contador">—</div>
+        <input type="text" id="f-buscar" placeholder="Buscar por nombre" autocomplete="off" style="margin-top:12px;"/>
+      </div>
+
+      <div class="card">
+        <div class="card-title" id="titulo-deben">deben retirar</div>
+        <div id="lista-deben"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" id="titulo-ausentes">ausentes</div>
+        <div id="lista-ausentes"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">comentarios del día</div>
+        <textarea id="f-nota" maxlength="1000"
+                  placeholder="Ej.: vino Fulano, no figura en la lista"></textarea>
+        <div class="btn-row">
+          <button class="btn-primary" id="btn-nota">Guardar</button>
+        </div>
+        <div id="nota-msg" class="hidden" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script>
+    const DIAS_LARGOS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+    // El día que está mostrando la pantalla. La primera carga va sin fecha: la
+    // resuelve el servidor (hoy en hora de Asunción) y vuelve en la respuesta,
+    // así el día no depende del reloj ni de la zona del navegador.
+    let fechaActual = null;
+    let empresaActual = null;
+    let HOY = null;
+    let DIA = null;
+    // Marcas con el PUT en vuelo: la fila ya muestra el estado nuevo, pero no
+    // acepta otro toque hasta que el servidor conteste.
+    const enviando = new Set();
+
+    (async function () {
+      await ensureSession();
+      renderNav('/retiros');
+
+      const params = new URLSearchParams(window.location.search);
+      fechaActual = params.get('fecha') || null;
+      // No hay selector de empresa: hoy el único comedor con atención en el
+      // lugar es UENO BANK y el servidor la resuelve solo. El parámetro queda
+      // disponible por si algún día hay dos activas a la vez.
+      empresaActual = params.get('empresa') || null;
+
+      document.getElementById('f-fecha').addEventListener('change', (ev) => {
+        if (!ev.target.value) return;
+        // El comedor funciona de lunes a viernes: si eligen un sábado, se
+        // muestra el viernes en lugar de devolver un error que no ayuda.
+        fechaActual = esHabil(ev.target.value) ? ev.target.value : habilAnterior(ev.target.value);
+        cargar();
+      });
+      document.getElementById('btn-prev').addEventListener('click', () => {
+        fechaActual = habilAnterior(fechaActual);
+        cargar();
+      });
+      document.getElementById('btn-next').addEventListener('click', () => {
+        const siguiente = proximoHabil(sumarDias(fechaActual, 1));
+        if (siguiente > HOY) return;
+        fechaActual = siguiente;
+        cargar();
+      });
+
+      document.getElementById('f-buscar').addEventListener('input', pintarListas);
+
+      // Delegación: la lista se vuelve a dibujar en cada marca y en cada letra
+      // del buscador, así que los listeners no pueden vivir en los botones.
+      document.getElementById('lista-deben').addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.retiros-toggle');
+        if (btn && btn.dataset.id) alternar(Number(btn.dataset.id));
+      });
+
+      document.getElementById('btn-nota').addEventListener('click', guardarNota);
+
+      await cargar();
+    })();
+
+    // ── Fechas ───────────────────────────────────────────────────
+    // Aritmética en UTC, igual que en el servidor: sumar 86.400.000 ms es
+    // exacto y no depende del horario de verano de la máquina.
+
+    function msUTC(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return Date.UTC(y, m - 1, d);
+    }
+    function isoUTC(ms) {
+      const dt = new Date(ms);
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+    }
+    function sumarDias(iso, n) { return isoUTC(msUTC(iso) + n * 86400000); }
+    function diaSemana(iso) { return new Date(msUTC(iso)).getUTCDay(); }
+    function esHabil(iso) { const d = diaSemana(iso); return d >= 1 && d <= 5; }
+    function proximoHabil(iso) { let f = iso; while (!esHabil(f)) f = sumarDias(f, 1); return f; }
+    function habilAnterior(iso) { let f = sumarDias(iso, -1); while (!esHabil(f)) f = sumarDias(f, -1); return f; }
+
+    // ── Carga ────────────────────────────────────────────────────
+
+    function mostrarError(msg) {
+      const box = document.getElementById('error-global');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+    }
+
+    async function cargar() {
+      document.getElementById('error-global').classList.add('hidden');
+      document.getElementById('nota-msg').classList.add('hidden');
+      document.getElementById('lista-deben').innerHTML = '<div class="empty-state">Cargando...</div>';
+      document.getElementById('lista-ausentes').innerHTML = '';
+      enviando.clear();
+
+      const params = new URLSearchParams();
+      if (fechaActual) params.set('fecha', fechaActual);
+      if (empresaActual) params.set('empresa', empresaActual);
+
+      let data;
+      try {
+        data = await api('/api/retiros/dia' + (params.toString() ? '?' + params.toString() : ''));
+      } catch (e) {
+        DIA = null;
+        document.getElementById('lista-deben').innerHTML = '';
+        document.getElementById('contador').textContent = '—';
+        mostrarError('No se pudo cargar el día: ' + e.message);
+        return;
+      }
+
+      DIA = data;
+      fechaActual = data.fecha;
+      empresaActual = data.empresa;
+      HOY = data.hoy;
+
+      const input = document.getElementById('f-fecha');
+      input.max = HOY;
+      input.value = fechaActual;
+
+      // Nunca más allá de hoy: no se entregó nada que se pueda marcar.
+      document.getElementById('btn-next').disabled = proximoHabil(sumarDias(fechaActual, 1)) > HOY;
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('fecha', fechaActual);
+      window.history.replaceState({}, '', url);
+
+      const relativo = fechaActual === HOY ? ' · hoy'
+        : fechaActual === habilAnterior(HOY) ? ' · día hábil anterior' : '';
+      document.getElementById('sub-header').textContent =
+        `${DIA.empresa} · ${DIAS_LARGOS[diaSemana(fechaActual)]} ${fmtFecha(fechaActual)}${relativo}`;
+
+      const sinServicio = document.getElementById('aviso-sin-servicio');
+      if (DIA.sin_servicio) {
+        sinServicio.textContent = 'Este día no hay servicio' +
+          (DIA.motivo_sin_servicio ? ': ' + DIA.motivo_sin_servicio : '') + '. No hay viandas para entregar.';
+        sinServicio.classList.remove('hidden');
+      } else {
+        sinServicio.classList.add('hidden');
+      }
+
+      // Dos motivos distintos para quedar en solo lectura, y conviene decir
+      // cuál: el visor nunca puede marcar, y al comedor se le cierran los días
+      // viejos.
+      const soloLectura = document.getElementById('aviso-solo-lectura');
+      if (DIA.editable) {
+        soloLectura.classList.add('hidden');
+      } else {
+        soloLectura.textContent = DIA.puede_marcar
+          ? 'Este día ya no se puede modificar. Solo se marcan hoy y el día hábil anterior.'
+          : 'Esta pantalla es de solo lectura para tu usuario: las marcas las pone el comedor.';
+        soloLectura.classList.remove('hidden');
+      }
+
+      const nota = document.getElementById('f-nota');
+      nota.value = DIA.nota || '';
+      nota.disabled = !DIA.editable;
+      document.getElementById('btn-nota').disabled = !DIA.editable;
+
+      pintarListas();
+    }
+
+    // ── Dibujo ───────────────────────────────────────────────────
+
+    function pintarContador() {
+      const t = DIA.totales;
+      document.getElementById('contador').innerHTML =
+        `<span>Retiraron ${t.retiraron} de ${t.deben_retirar}</span>` +
+        (t.deben_retirar === 0
+          ? ''
+          : t.sin_marcar > 0
+            ? `<span class="retiros-contador-falta">· faltan ${t.sin_marcar}</span>`
+            : '<span class="retiros-contador-listo">· retiraron todos</span>');
+    }
+
+    function horaDe(iso) {
+      if (!iso) return '';
+      const dt = new Date(iso);
+      if (isNaN(dt.getTime())) return '';
+      return dt.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function pintarListas() {
+      if (!DIA) return;
+      pintarContador();
+
+      const q = document.getElementById('f-buscar').value.trim().toLowerCase();
+      const coincide = p => !q || p.nombre_completo.toLowerCase().includes(q);
+
+      const deben = DIA.deben_retirar.filter(coincide);
+      const ausentes = DIA.ausentes.filter(coincide);
+
+      document.getElementById('titulo-deben').textContent =
+        `deben retirar · ${DIA.deben_retirar.length}`;
+      document.getElementById('titulo-ausentes').textContent =
+        `ausentes · ${DIA.ausentes.length}`;
+
+      document.getElementById('lista-deben').innerHTML = deben.length
+        ? deben.map(itemDebe).join('')
+        : `<div class="empty-state">${DIA.deben_retirar.length
+            ? 'Ningún nombre coincide con la búsqueda.'
+            : 'Nadie tiene vianda para retirar este día.'}</div>`;
+
+      document.getElementById('lista-ausentes').innerHTML = ausentes.length
+        ? ausentes.map(itemAusente).join('')
+        : `<div class="empty-state">${DIA.ausentes.length
+            ? 'Ningún nombre coincide con la búsqueda.'
+            : 'Sin ausencias cargadas.'}</div>`;
+    }
+
+    function itemDebe(p) {
+      const enVuelo = enviando.has(p.cliente_id);
+      return `
+        <div class="retiros-item">
+          <div class="retiros-item-datos">
+            <div class="retiros-nombre">${escapeHtml(p.nombre_completo)}</div>
+            <div class="retiros-plato">${escapeHtml(p.plato_nombre)}</div>
+            ${p.observacion ? `<div class="retiros-obs">${escapeHtml(p.observacion)}</div>` : ''}
+            ${p.retiro && p.marcado_en ? `<div class="retiros-hora">Retiró ${escapeHtml(horaDe(p.marcado_en))}</div>` : ''}
+          </div>
+          <button class="retiros-toggle ${p.retiro ? 'retiros-toggle-si' : ''}${enVuelo ? ' retiros-toggle-enviando' : ''}"
+                  data-id="${p.cliente_id}"
+                  ${DIA.editable && !enVuelo ? '' : 'disabled'}>
+            ${p.retiro ? 'Retiró ✓' : 'Marcar retiro'}
+          </button>
+        </div>`;
+    }
+
+    function itemAusente(a) {
+      return `
+        <div class="retiros-item retiros-ausente">
+          <div class="retiros-item-datos">
+            <div class="retiros-nombre">${escapeHtml(a.nombre_completo)}</div>
+            <div class="retiros-plato">
+              ${escapeHtml(AUSENCIA_LABEL[a.ausencia] || a.ausencia)}${a.comentario ? ' · ' + escapeHtml(a.comentario) : ''}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ── Marcar / desmarcar ───────────────────────────────────────
+    // Actualización optimista: la fila cambia en el acto (el que entrega ya
+    // pasó a la persona siguiente) y si el servidor falla se revierte y se
+    // muestra el error.
+
+    function recalcularTotales() {
+      const retiraron = DIA.deben_retirar.filter(p => p.retiro).length;
+      DIA.totales = {
+        deben_retirar: DIA.deben_retirar.length,
+        retiraron,
+        sin_marcar: DIA.deben_retirar.length - retiraron,
+      };
+    }
+
+    async function alternar(clienteId) {
+      if (!DIA || !DIA.editable || enviando.has(clienteId)) return;
+
+      const persona = DIA.deben_retirar.find(p => p.cliente_id === clienteId);
+      if (!persona) return;
+
+      const retiroAntes = persona.retiro;
+      const horaAntes = persona.marcado_en;
+      const retiro = !retiroAntes;
+
+      persona.retiro = retiro;
+      persona.marcado_en = retiro ? new Date().toISOString() : null;
+      enviando.add(clienteId);
+      recalcularTotales();
+      pintarListas();
+
+      try {
+        const r = await api('/api/retiros/marca', {
+          method: 'PUT',
+          body: { cliente_id: clienteId, fecha: DIA.fecha, retiro },
+        });
+        // La hora buena es la del servidor, no la que puso el navegador.
+        persona.marcado_en = r.marcado_en;
+        document.getElementById('error-global').classList.add('hidden');
+      } catch (e) {
+        persona.retiro = retiroAntes;
+        persona.marcado_en = horaAntes;
+        mostrarError(`No se pudo guardar la marca de ${persona.nombre_completo}: ${e.message}`);
+      } finally {
+        enviando.delete(clienteId);
+        recalcularTotales();
+        pintarListas();
+      }
+    }
+
+    // ── Comentarios del día ──────────────────────────────────────
+
+    async function guardarNota() {
+      if (!DIA || !DIA.editable) return;
+
+      const btn = document.getElementById('btn-nota');
+      const msg = document.getElementById('nota-msg');
+      const texto = document.getElementById('f-nota').value;
+
+      btn.disabled = true;
+      msg.classList.add('hidden');
+
+      try {
+        const r = await api('/api/retiros/nota', {
+          method: 'PUT',
+          body: { empresa: DIA.empresa, fecha: DIA.fecha, texto },
+        });
+        DIA.nota = r.nota;
+        document.getElementById('f-nota').value = r.nota || '';
+        msg.className = 'form-success';
+        msg.textContent = r.nota ? 'Comentario guardado.' : 'Comentario borrado.';
+      } catch (e) {
+        msg.className = 'form-error';
+        msg.textContent = 'No se pudo guardar el comentario: ' + e.message;
+      } finally {
+        btn.disabled = !DIA.editable;
+        msg.classList.remove('hidden');
+      }
+    }
+  </script>
+</body>
+</html>

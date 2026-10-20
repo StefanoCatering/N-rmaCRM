@@ -463,3 +463,73 @@ input:focus, select:focus, textarea:focus { border-color: var(--orange); backgro
 .resumen-detalle > summary::marker { content: ''; }
 .resumen-detalle > summary::before { content: '▸ '; }
 .resumen-detalle[open] > summary::before { content: '▾ '; }
+
+/* ══════════════════════════════════════════════════════
+   RETIROS EN EL COMEDOR (fase 10)
+   Se usa de pie, en un celular o una tablet, mientras hay gente esperando:
+   una sola columna, un toque por persona y objetivos de 48px para el dedo.
+   Lo único que importa a la distancia es si esa fila ya está en verde.
+   ══════════════════════════════════════════════════════ */
+.retiros-barra { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.retiros-barra input[type="date"] { flex: 1 1 150px; min-width: 150px; }
+
+/* Los botones de día y el de guardar la nota: altos, para el pulgar. */
+.retiros-btn-dia {
+  flex: 0 0 auto; min-height: 48px; padding: 12px 14px;
+  border: 1.5px solid var(--border2); border-radius: var(--radius); background: white;
+  font-family: var(--font); font-size: 11px; font-weight: 500; color: var(--text2);
+  cursor: pointer; transition: all 0.15s;
+}
+.retiros-btn-dia:hover:not(:disabled) { background: var(--beige); }
+.retiros-btn-dia:disabled { opacity: 0.4; cursor: default; }
+
+.retiros-contador {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  font-size: 13px; font-weight: 600; color: var(--navy);
+}
+.retiros-contador-falta { font-size: 11px; font-weight: 500; color: var(--orange); }
+.retiros-contador-listo { font-size: 11px; font-weight: 600; color: var(--green); }
+
+/* Una persona por fila: datos a la izquierda, el botón grande a la derecha. */
+.retiros-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.retiros-item:last-child { border-bottom: none; }
+.retiros-item-datos { flex: 1; min-width: 0; }
+.retiros-nombre { font-size: 13px; font-weight: 600; color: var(--navy); overflow-wrap: anywhere; }
+.retiros-plato  { font-size: 11px; color: var(--text2); margin-top: 3px; overflow-wrap: anywhere; }
+/* La observación fija ("no consume cerdo") en naranja: es lo que no se puede
+   pasar por alto al entregarle la vianda a esa persona. */
+.retiros-obs    { font-size: 11px; color: var(--orange); font-weight: 600; margin-top: 3px; overflow-wrap: anywhere; }
+.retiros-hora   { font-size: 9px; color: var(--text3); margin-top: 3px; }
+
+.retiros-toggle {
+  flex: 0 0 auto; min-width: 116px; min-height: 48px; padding: 10px 12px;
+  border-radius: var(--radius); border: 1.5px solid var(--border2); background: white;
+  font-family: var(--font); font-size: 11px; font-weight: 600; color: var(--text2);
+  cursor: pointer; transition: all 0.15s;
+}
+.retiros-toggle:hover:not(:disabled) { background: var(--beige); }
+.retiros-toggle-si {
+  background: var(--green); border-color: var(--green); color: white;
+}
+.retiros-toggle-si:hover:not(:disabled) { background: var(--green); opacity: 0.9; }
+.retiros-toggle:disabled { cursor: default; opacity: 0.75; }
+/* Mientras el PUT viaja: la fila ya muestra el estado nuevo (actualización
+   optimista) pero no acepta otro toque hasta que el server conteste. */
+.retiros-toggle-enviando { opacity: 0.5; }
+
+/* Ausentes: se ven, pero apagados y sin botón — no hay nada que entregarles. */
+.retiros-ausente .retiros-nombre { color: var(--text3); font-weight: 500; }
+.retiros-ausente .retiros-plato  { color: var(--text3); }
+
+.retiros-aviso {
+  background: var(--beige2); border: 1px solid rgba(245,167,45,0.35);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px;
+  font-size: 11px; font-weight: 600; color: var(--navy);
+}
+
+@media (max-width: 420px) {
+  .retiros-toggle { min-width: 96px; font-size: 10px; }
+}
