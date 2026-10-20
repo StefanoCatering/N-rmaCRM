@@ -1,6 +1,14 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
 const pool = require('../models/db');
+// Solo por los pedazos de SQL de la ventana de entrega: el Excel de pedidos
+// filtra con la MISMA regla que el listado de la pantalla (fase 11), así que
+// la regla vive en un solo lugar.
+const {
+  SQL_FECHAS_LINEAS, SQL_ENTREGA_INICIO, SQL_ENTREGA_FIN,
+} = require('../models/pedidos');
+// aISO: normaliza las fechas que vuelven del driver pg (ver fmtFecha abajo).
+const { aISO } = require('../models/pedidoDetalle');
 
 const router = express.Router();
 
@@ -13,9 +21,28 @@ const CANAL_LABEL = {
 };
 const ESTADO_LABEL = { activo: 'Activo', pausado: 'Pausado', inactivo: 'Inactivo', baja: 'Baja' };
 
-function fmtFecha(iso) {
-  if (!iso) return '';
-  return String(iso).slice(0, 10).split('-').reverse().join('/');
+// El driver pg devuelve las columnas DATE como Date de JS, no como string, así
+// que antes de formatear hay que normalizar (aISO usa los componentes LOCALES
+// por el mismo motivo que en models/pedidoDetalle.js: toISOString() correría el
+// día según el offset de la máquina).
+//
+// Sin ese paso, String(valor).slice(0, 10) de un Date da 'Mon Mar 10' y la
+// celda salía con el día de la semana en lugar de la fecha.
+function fmtFecha(valor) {
+  const iso = aISO(valor);
+  return iso ? iso.split('-').reverse().join('/') : '';
+}
+
+// La ventana de entrega con el mismo formato que la columna "Entrega" de la
+// pantalla (ver fmtEntrega en public/js/common.js): una sola fecha cuando
+// empieza y termina el mismo día, el rango cuando no, y vacío cuando el pedido
+// no tiene entrega cargada. En el Excel el vacío va vacío, no "—": una celda
+// en blanco es lo que Excel sabe filtrar y ordenar.
+function fmtEntrega(desde, hasta) {
+  const d = aISO(desde) || aISO(hasta);
+  const h = aISO(hasta) || aISO(desde);
+  if (!d) return '';
+  return d === h ? fmtFecha(d) : `${fmtFecha(d)} → ${fmtFecha(h)}`;
 }
 
 // ── Helpers ExcelJS ───────────────────────────────────────────────
@@ -48,10 +75,14 @@ function autoWidth(worksheet) {
 
 // GET /api/export?tipo=pedidos — exporta solo la hoja "Pedidos" filtrada
 // (vista de historial de pedidos para admin/operador).
-// Parámetros: cliente_id, fecha_desde, fecha_hasta, estado (estado del cliente),
-// estado_pago y tipo_vianda (de pedidos), segmento y canal_origen (de clientes).
+// Parámetros: cliente_id, fecha_desde, fecha_hasta, fecha_tipo ('entrega' |
+// 'pedido', default 'pedido'), estado (estado del cliente), estado_pago y
+// tipo_vianda (de pedidos), segmento y canal_origen (de clientes).
 async function exportarPedidos(req, res) {
-  const { cliente_id, fecha_desde, fecha_hasta, estado, estado_pago, tipo_vianda, segmento, canal_origen } = req.query;
+  const {
+    cliente_id, fecha_desde, fecha_hasta, fecha_tipo,
+    estado, estado_pago, tipo_vianda, segmento, canal_origen,
+  } = req.query;
   const ESTADOS_CLIENTE = ['activo', 'pausado', 'inactivo', 'baja'];
   const ESTADOS_PAGO = ['pagado', 'pendiente', 'parcial'];
   const TIPOS_VIANDA_FILTRO = ['economico', 'saludable', 'low_carb', 'modificacion_menu', 'sin_vianda'];
@@ -66,9 +97,23 @@ async function exportarPedidos(req, res) {
   const params = [];
   let idx = 1;
 
+  // Sobre qué fecha pesan fecha_desde/fecha_hasta: la de entrega o la de
+  // carga. Es el mismo parámetro que manda la pantalla (fase 11), para que el
+  // Excel salga filtrado igual que lo que está a la vista. Cualquier otro
+  // valor —o ninguno— filtra por fecha_pedido, como siempre.
+  const porEntrega = fecha_tipo === 'entrega' && !!(fecha_desde || fecha_hasta);
+
   if (cliente_id && Number(cliente_id)) { where.push(`p.cliente_id = $${idx++}`);  params.push(Number(cliente_id)); }
-  if (fecha_desde)                      { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
-  if (fecha_hasta)                      { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
+  if (porEntrega) {
+    // Solapamiento de la ventana de entrega con [fecha_desde, fecha_hasta],
+    // con las constantes de models/pedidos.js: entrega_desde <= hasta AND
+    // entrega_hasta >= desde, y con una sola de las dos fechas, solo esa mitad.
+    if (fecha_hasta) { where.push(`${SQL_ENTREGA_INICIO} <= $${idx++}`); params.push(fecha_hasta); }
+    if (fecha_desde) { where.push(`${SQL_ENTREGA_FIN} >= $${idx++}`);    params.push(fecha_desde); }
+  } else {
+    if (fecha_desde) { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
+    if (fecha_hasta) { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
+  }
   if (estado && ESTADOS_CLIENTE.includes(estado)) { where.push(`c.estado = $${idx++}`); params.push(estado); }
   if (estado_pago && ESTADOS_PAGO.includes(estado_pago)) { where.push(`p.estado_pago = $${idx++}`); params.push(estado_pago); }
   if (segmento && SEGMENTOS.includes(segmento)) { where.push(`c.segmento = $${idx++}`); params.push(segmento); }
@@ -80,10 +125,16 @@ async function exportarPedidos(req, res) {
     params.push(tipo_vianda);
   }
 
+  // El LEFT JOIN va siempre, no solo cuando se filtra por entrega: la columna
+  // "Entrega" de la hoja sale de ahí.
   const { rows: pedidos } = await pool.query(`
-    SELECT c.nombre_completo, c.cedula, p.fecha_pedido, p.monto, p.descripcion
+    SELECT
+      c.nombre_completo, c.cedula, p.fecha_pedido, p.monto, p.descripcion,
+      ${SQL_ENTREGA_INICIO} AS entrega_desde,
+      ${SQL_ENTREGA_FIN}    AS entrega_hasta
     FROM pedidos p
     JOIN clientes c ON c.id = p.cliente_id
+    LEFT JOIN (${SQL_FECHAS_LINEAS}) dl ON dl.pedido_id = p.id
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY p.fecha_pedido DESC, p.id DESC
   `, params);
@@ -97,6 +148,7 @@ async function exportarPedidos(req, res) {
     { header: 'Nombre cliente', key: 'nombre_completo' },
     { header: 'Cédula',         key: 'cedula'          },
     { header: 'Fecha pedido',   key: 'fecha_pedido'    },
+    { header: 'Entrega',        key: 'entrega'         },
     { header: 'Monto (Gs.)',    key: 'monto'           },
     { header: 'Descripción',    key: 'descripcion'     },
   ];
@@ -107,6 +159,7 @@ async function exportarPedidos(req, res) {
       nombre_completo: p.nombre_completo,
       cedula:          p.cedula,
       fecha_pedido:    fmtFecha(p.fecha_pedido),
+      entrega:         fmtEntrega(p.entrega_desde, p.entrega_hasta),
       monto:           p.monto,
       descripcion:     p.descripcion || '',
     });
@@ -129,7 +182,9 @@ async function exportarPedidos(req, res) {
  * Parámetros específicos de exportación:
  *   tipo = 'datos' | 'historial' | 'pedidos'
  *   fecha_desde, fecha_hasta (solo para historial, filtran la hoja Pedidos)
- *   tipo=pedidos usa cliente_id, fecha_desde, fecha_hasta, estado (ver exportarPedidos)
+ *   tipo=pedidos usa cliente_id, fecha_desde, fecha_hasta, fecha_tipo, estado
+ *     (ver exportarPedidos). fecha_tipo solo aplica a tipo=pedidos: el
+ *     historial de un cliente sigue filtrando por fecha de carga.
  */
 router.get('/', async (req, res, next) => {
   try {

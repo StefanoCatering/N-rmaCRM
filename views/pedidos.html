@@ -394,8 +394,9 @@
       const canal = document.getElementById('f-canal').value;
       if (desde) params.set('fecha_desde', desde);
       if (hasta) params.set('fecha_hasta', hasta);
-      // Solo cuando hay alguna fecha: sin rango, fecha_tipo no filtra nada y
-      // ensuciaría la URL del export.
+      // Solo cuando hay alguna fecha: sin rango no hay nada sobre qué elegir
+      // una fecha u otra. Estos params también son los del botón Exportar, que
+      // filtra el Excel por lo mismo que la pantalla (ver routes/export.js).
       if (desde || hasta) params.set('fecha_tipo', document.getElementById('f-fecha-tipo').value);
       if (estado) params.set('estado', estado);
       if (estadoPago) params.set('estado_pago', estadoPago);

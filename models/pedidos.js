@@ -143,6 +143,11 @@ const SQL_FECHAS_LINEAS = `
 // La ventana de entrega de un pedido, en SQL: las líneas vivas si tiene, la
 // cabecera si no. Es la misma regla que entregaEfectiva() más abajo — acá en
 // SQL porque el filtro por fecha de entrega se resuelve en la base.
+//
+// Las cuatro constantes asumen los alias `p` (pedidos) y `dl` (el agregado de
+// SQL_FECHAS_LINEAS): quien las reuse tiene que nombrar sus tablas igual.
+// routes/export.js las importa para filtrar el Excel con exactamente esta
+// regla, en lugar de volver a escribirla.
 const SQL_ENTREGA_DESDE = 'COALESCE(dl.desde, p.fecha_entrega_desde)';
 const SQL_ENTREGA_HASTA = 'COALESCE(dl.hasta, p.fecha_entrega_hasta)';
 // Para el solapamiento: cuando de la ventana se conoce una sola punta (pasa en
@@ -478,4 +483,7 @@ module.exports = {
   // exportadas para poder verificar las reglas del listado (qué envase y qué
   // ventana de entrega muestra un pedido) sin pedidos de prueba en la base
   envaseEfectivo, entregaEfectiva, fechasDeLineas,
+  // los pedazos de SQL de la ventana de entrega, para que el export de Excel
+  // filtre con la MISMA regla que el listado y no con una copia
+  SQL_FECHAS_LINEAS, SQL_ENTREGA_INICIO, SQL_ENTREGA_FIN,
 };
