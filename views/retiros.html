@@ -11,9 +11,11 @@
   <div class="app">
     <div class="nav" id="nav"></div>
 
-    <!-- Una sola columna y angosta a propósito: esto se usa en un celular o
-         una tablet, de pie, en el comedor del banco. -->
-    <div class="view" style="max-width:640px;margin:0 auto;">
+    <!-- Una sola columna angosta en celular; en pantalla ancha (>=1000px) el
+         CSS la abre a dos columnas y convierte la lista en tabla. El ancho
+         vive en .retiros-view y no en un style inline, justamente para que la
+         media query pueda pisarlo. -->
+    <div class="view retiros-view">
       <div class="view-header">
         <div>
           <div class="view-header-title">retiros</div>
@@ -30,37 +32,54 @@
       <div id="aviso-sin-servicio" class="alerta-banner hidden"></div>
       <div id="aviso-solo-lectura" class="retiros-aviso hidden"></div>
 
-      <div class="card">
-        <div class="retiros-barra">
-          <button class="retiros-btn-dia" id="btn-prev">← Día anterior</button>
-          <input type="date" id="f-fecha" title="Día"/>
-          <button class="retiros-btn-dia" id="btn-next">Día siguiente →</button>
+      <!-- Dos cards en celular (como siempre); en escritorio el CSS las
+           aplana con display:contents y las deja en una sola fila pegajosa. -->
+      <div class="retiros-barra-sticky" id="barra">
+        <div class="card">
+          <div class="retiros-barra">
+            <button class="retiros-btn-dia" id="btn-prev">← Día anterior</button>
+            <input type="date" id="f-fecha" title="Día"/>
+            <button class="retiros-btn-dia" id="btn-next">Día siguiente →</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="retiros-contador" id="contador">—</div>
+          <input type="text" id="f-buscar" class="retiros-buscador"
+                 placeholder="Buscar por nombre" autocomplete="off"/>
+          <div class="retiros-filtros" id="filtros">
+            <button class="retiros-filtro activo" data-filtro="todos">Todos</button>
+            <button class="retiros-filtro" data-filtro="faltan">Faltan</button>
+            <button class="retiros-filtro" data-filtro="retiraron">Retiraron</button>
+          </div>
+          <div id="aviso-teclado" class="retiros-aviso-teclado hidden"></div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="retiros-contador" id="contador">—</div>
-        <input type="text" id="f-buscar" placeholder="Buscar por nombre" autocomplete="off" style="margin-top:12px;"/>
-      </div>
-
-      <div class="card">
-        <div class="card-title" id="titulo-deben">deben retirar</div>
-        <div id="lista-deben"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title" id="titulo-ausentes">ausentes</div>
-        <div id="lista-ausentes"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">comentarios del día</div>
-        <textarea id="f-nota" maxlength="1000"
-                  placeholder="Ej.: vino Fulano, no figura en la lista"></textarea>
-        <div class="btn-row">
-          <button class="btn-primary" id="btn-nota">Guardar</button>
+      <div class="retiros-columnas">
+        <div class="retiros-col-principal">
+          <div class="card">
+            <div class="card-title" id="titulo-deben">deben retirar</div>
+            <div id="lista-deben"></div>
+          </div>
         </div>
-        <div id="nota-msg" class="hidden" style="margin-top:8px;"></div>
+
+        <div class="retiros-col-lateral">
+          <div class="card">
+            <div class="card-title" id="titulo-ausentes">ausentes</div>
+            <div id="lista-ausentes"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">comentarios del día</div>
+            <textarea id="f-nota" maxlength="1000"
+                      placeholder="Ej.: vino Fulano, no figura en la lista"></textarea>
+            <div class="btn-row">
+              <button class="btn-primary" id="btn-nota">Guardar</button>
+            </div>
+            <div id="nota-msg" class="hidden" style="margin-top:8px;"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -69,6 +88,11 @@
   <script>
     const DIAS_LARGOS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
+    // El mismo corte que usa el CSS. En pantalla ancha la lista se dibuja como
+    // tabla y marcar/deshacer son DOS controles distintos; en celular sigue
+    // siendo un botón que alterna, igual que antes.
+    const ANCHA = window.matchMedia('(min-width: 1000px)');
+
     // El día que está mostrando la pantalla. La primera carga va sin fecha: la
     // resuelve el servidor (hoy en hora de Asunción) y vuelve en la respuesta,
     // así el día no depende del reloj ni de la zona del navegador.
@@ -76,13 +100,16 @@
     let empresaActual = null;
     let HOY = null;
     let DIA = null;
+    let filtroEstado = 'todos';
     // Marcas con el PUT en vuelo: la fila ya muestra el estado nuevo, pero no
     // acepta otro toque hasta que el servidor conteste.
     const enviando = new Set();
+    let timerAviso = null;
 
     (async function () {
       await ensureSession();
       renderNav('/retiros');
+      medirNav();
 
       const params = new URLSearchParams(window.location.search);
       fechaActual = params.get('fecha') || null;
@@ -109,19 +136,52 @@
         cargar();
       });
 
-      document.getElementById('f-buscar').addEventListener('input', pintarListas);
+      const buscador = document.getElementById('f-buscar');
+      buscador.addEventListener('input', () => { ocultarAvisoTeclado(); pintarListas(); });
+      buscador.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); enterEnBuscador(); }
+        else if (ev.key === 'Escape') { ev.preventDefault(); limpiarBuscador(); }
+      });
+
+      document.getElementById('filtros').addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.retiros-filtro');
+        if (!btn) return;
+        filtroEstado = btn.dataset.filtro;
+        for (const b of document.querySelectorAll('.retiros-filtro')) {
+          b.classList.toggle('activo', b === btn);
+        }
+        ocultarAvisoTeclado();
+        pintarListas();
+      });
 
       // Delegación: la lista se vuelve a dibujar en cada marca y en cada letra
       // del buscador, así que los listeners no pueden vivir en los botones.
       document.getElementById('lista-deben').addEventListener('click', (ev) => {
-        const btn = ev.target.closest('.retiros-toggle');
-        if (btn && btn.dataset.id) alternar(Number(btn.dataset.id));
+        const btn = ev.target.closest('[data-accion]');
+        if (!btn || !btn.dataset.id || btn.disabled) return;
+        const clienteId = Number(btn.dataset.id);
+        if (btn.dataset.accion === 'alternar') return alternar(clienteId);
+        marcarRetiro(clienteId, btn.dataset.accion === 'marcar');
       });
 
       document.getElementById('btn-nota').addEventListener('click', guardarNota);
 
+      // Al pasar de celular a escritorio (o al rotar la tablet) cambia la
+      // forma de dibujar la lista, no solo su ancho.
+      ANCHA.addEventListener('change', () => { ocultarAvisoTeclado(); pintarListas(); });
+      window.addEventListener('resize', medirNav);
+
       await cargar();
     })();
+
+    // La barra de días queda pegajosa DEBAJO del nav, que también es sticky y
+    // cuya altura cambia según cuántos links tenga el rol. Se mide y se pasa a
+    // CSS en vez de clavar un número que se rompería con el nav de otro rol.
+    function medirNav() {
+      const nav = document.getElementById('nav');
+      if (!nav) return;
+      document.documentElement.style.setProperty('--nav-h', nav.offsetHeight + 'px');
+    }
 
     // ── Fechas ───────────────────────────────────────────────────
     // Aritmética en UTC, igual que en el servidor: sumar 86.400.000 ms es
@@ -154,6 +214,7 @@
       document.getElementById('nota-msg').classList.add('hidden');
       document.getElementById('lista-deben').innerHTML = '<div class="empty-state">Cargando...</div>';
       document.getElementById('lista-ausentes').innerHTML = '';
+      ocultarAvisoTeclado();
       enviando.clear();
 
       const params = new URLSearchParams();
@@ -220,6 +281,11 @@
       document.getElementById('btn-nota').disabled = !DIA.editable;
 
       pintarListas();
+
+      // En escritorio se trabaja con el teclado: el día abre con el cursor en
+      // el buscador. En celular no, porque levantaría el teclado en pantalla
+      // tapando media lista.
+      if (ANCHA.matches && DIA.editable) document.getElementById('f-buscar').focus();
     }
 
     // ── Dibujo ───────────────────────────────────────────────────
@@ -235,6 +301,7 @@
             : '<span class="retiros-contador-listo">· retiraron todos</span>');
     }
 
+    // Hora larga de la lista de celular ("12:12 p. m."), tal cual estaba.
     function horaDe(iso) {
       if (!iso) return '';
       const dt = new Date(iso);
@@ -242,26 +309,50 @@
       return dt.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' });
     }
 
+    // Hora corta para el badge de la tabla y el aviso del teclado: ahí entra
+    // un HH:MM y no "12:12 p. m.".
+    function horaCorta(iso) {
+      if (!iso) return '';
+      const dt = new Date(iso);
+      if (isNaN(dt.getTime())) return '';
+      return dt.toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    // El filtro de estado y el buscador se combinan: "Faltan" + "gonz" son los
+    // González que todavía no retiraron.
+    function visiblesDeben() {
+      if (!DIA) return [];
+      const q = document.getElementById('f-buscar').value.trim().toLowerCase();
+      return DIA.deben_retirar.filter(p => {
+        if (q && !p.nombre_completo.toLowerCase().includes(q)) return false;
+        if (filtroEstado === 'faltan') return !p.retiro;
+        if (filtroEstado === 'retiraron') return p.retiro;
+        return true;
+      });
+    }
+
     function pintarListas() {
       if (!DIA) return;
       pintarContador();
 
       const q = document.getElementById('f-buscar').value.trim().toLowerCase();
-      const coincide = p => !q || p.nombre_completo.toLowerCase().includes(q);
+      const deben = visiblesDeben();
+      // Los ausentes no tienen estado de retiro, así que el filtro de estado no
+      // les aplica: solo el buscador.
+      const ausentes = DIA.ausentes.filter(a => !q || a.nombre_completo.toLowerCase().includes(q));
 
-      const deben = DIA.deben_retirar.filter(coincide);
-      const ausentes = DIA.ausentes.filter(coincide);
-
+      const total = DIA.deben_retirar.length;
       document.getElementById('titulo-deben').textContent =
-        `deben retirar · ${DIA.deben_retirar.length}`;
-      document.getElementById('titulo-ausentes').textContent =
-        `ausentes · ${DIA.ausentes.length}`;
+        `deben retirar · ${total}` + (deben.length !== total ? ` · mostrando ${deben.length}` : '');
+      document.getElementById('titulo-ausentes').textContent = `ausentes · ${DIA.ausentes.length}`;
+
+      const vacio = total
+        ? 'Ningún nombre coincide con el buscador o el filtro.'
+        : 'Nadie tiene vianda para retirar este día.';
 
       document.getElementById('lista-deben').innerHTML = deben.length
-        ? deben.map(itemDebe).join('')
-        : `<div class="empty-state">${DIA.deben_retirar.length
-            ? 'Ningún nombre coincide con la búsqueda.'
-            : 'Nadie tiene vianda para retirar este día.'}</div>`;
+        ? (ANCHA.matches ? tablaDeben(deben) : deben.map(itemDebe).join(''))
+        : `<div class="empty-state">${vacio}</div>`;
 
       document.getElementById('lista-ausentes').innerHTML = ausentes.length
         ? ausentes.map(itemAusente).join('')
@@ -269,6 +360,9 @@
             ? 'Ningún nombre coincide con la búsqueda.'
             : 'Sin ausencias cargadas.'}</div>`;
     }
+
+    // ── Celular: una tarjeta por persona, con el botón que alterna ──
+    // Tal cual la fase 10. No se tocó.
 
     function itemDebe(p) {
       const enVuelo = enviando.has(p.cliente_id);
@@ -281,11 +375,55 @@
             ${p.retiro && p.marcado_en ? `<div class="retiros-hora">Retiró ${escapeHtml(horaDe(p.marcado_en))}</div>` : ''}
           </div>
           <button class="retiros-toggle ${p.retiro ? 'retiros-toggle-si' : ''}${enVuelo ? ' retiros-toggle-enviando' : ''}"
-                  data-id="${p.cliente_id}"
+                  data-id="${p.cliente_id}" data-accion="alternar"
                   ${DIA.editable && !enVuelo ? '' : 'disabled'}>
             ${p.retiro ? 'Retiró ✓' : 'Marcar retiro'}
           </button>
         </div>`;
+    }
+
+    // ── Escritorio: tabla compacta ───────────────────────────────
+    // Marcar y deshacer son controles DISTINTOS: con 167 personas y el mouse,
+    // un clic de más sobre un botón que alterna borraría una entrega sin que
+    // nadie se dé cuenta.
+
+    function tablaDeben(lista) {
+      return `
+        <div class="table-wrap">
+          <table class="retiros-tabla">
+            <thead>
+              <tr>
+                <th>Nombre</th><th>Plato</th><th>Observación</th>
+                <th class="retiros-col-estado">Estado</th>
+              </tr>
+            </thead>
+            <tbody>${lista.map(filaDebe).join('')}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function filaDebe(p) {
+      const enVuelo = enviando.has(p.cliente_id);
+      return `
+        <tr class="${p.retiro ? 'retiros-fila-ok' : ''}${enVuelo ? ' retiros-fila-enviando' : ''}">
+          <td class="retiros-td-nombre">${escapeHtml(p.nombre_completo)}</td>
+          <td class="retiros-td-plato">${escapeHtml(p.plato_nombre)}</td>
+          <td class="retiros-td-obs">${p.observacion ? escapeHtml(p.observacion) : ''}</td>
+          <td class="retiros-col-estado">${celdaEstado(p, enVuelo)}</td>
+        </tr>`;
+    }
+
+    function celdaEstado(p, enVuelo) {
+      if (p.retiro) {
+        const hora = horaCorta(p.marcado_en);
+        const badge = `<span class="retiros-badge-ok">Retiró${hora ? ' ' + escapeHtml(hora) : ''}</span>`;
+        if (!DIA.editable) return badge;
+        return `${badge} <button class="retiros-deshacer" data-id="${p.cliente_id}" data-accion="desmarcar"
+                  ${enVuelo ? 'disabled' : ''}>Deshacer</button>`;
+      }
+      if (!DIA.editable) return '<span class="text-muted">sin marcar</span>';
+      return `<button class="retiros-btn-tabla" data-id="${p.cliente_id}" data-accion="marcar"
+                ${enVuelo ? 'disabled' : ''}>Marcar retiro</button>`;
     }
 
     function itemAusente(a) {
@@ -314,15 +452,21 @@
       };
     }
 
-    async function alternar(clienteId) {
+    // El botón de celular alterna; los de la tabla piden un estado concreto.
+    function alternar(clienteId) {
+      const persona = DIA && DIA.deben_retirar.find(p => p.cliente_id === clienteId);
+      if (!persona) return;
+      marcarRetiro(clienteId, !persona.retiro);
+    }
+
+    async function marcarRetiro(clienteId, retiro) {
       if (!DIA || !DIA.editable || enviando.has(clienteId)) return;
 
       const persona = DIA.deben_retirar.find(p => p.cliente_id === clienteId);
-      if (!persona) return;
+      if (!persona || persona.retiro === retiro) return;
 
       const retiroAntes = persona.retiro;
       const horaAntes = persona.marcado_en;
-      const retiro = !retiroAntes;
 
       persona.retiro = retiro;
       persona.marcado_en = retiro ? new Date().toISOString() : null;
@@ -347,6 +491,68 @@
         recalcularTotales();
         pintarListas();
       }
+    }
+
+    // ── Teclado (solo escritorio) ────────────────────────────────
+    // Con 167 personas, buscar con el mouse es el cuello de botella: se
+    // escriben tres letras del apellido y Enter.
+
+    function avisoTeclado(texto, clase) {
+      const box = document.getElementById('aviso-teclado');
+      box.textContent = texto;
+      box.className = 'retiros-aviso-teclado ' + clase;
+      if (timerAviso) clearTimeout(timerAviso);
+      timerAviso = setTimeout(ocultarAvisoTeclado, 4000);
+    }
+
+    function ocultarAvisoTeclado() {
+      if (timerAviso) { clearTimeout(timerAviso); timerAviso = null; }
+      document.getElementById('aviso-teclado').className = 'retiros-aviso-teclado hidden';
+    }
+
+    function limpiarBuscador() {
+      const buscador = document.getElementById('f-buscar');
+      buscador.value = '';
+      ocultarAvisoTeclado();
+      pintarListas();
+      buscador.focus();
+    }
+
+    function enterEnBuscador() {
+      if (!ANCHA.matches || !DIA || !DIA.editable) return;
+
+      const visibles = visiblesDeben();
+
+      if (visibles.length !== 1) {
+        avisoTeclado(
+          visibles.length === 0
+            ? 'Ningún nombre coincide con el buscador o el filtro.'
+            : `Hay ${visibles.length} coincidencias, hacé clic en la persona.`,
+          'retiros-aviso-nada'
+        );
+        return;
+      }
+
+      const persona = visibles[0];
+
+      // Ya marcada: no se manda nada al servidor. El aviso es justamente para
+      // que quien entrega sepa que esa vianda ya salió, y a qué hora.
+      if (persona.retiro) {
+        const hora = horaCorta(persona.marcado_en);
+        avisoTeclado(
+          `${persona.nombre_completo} ya retiró${hora ? ' a las ' + hora : ''}.`,
+          'retiros-aviso-ya'
+        );
+        return;
+      }
+
+      marcarRetiro(persona.cliente_id, true);
+      avisoTeclado(`Marcado: ${persona.nombre_completo}.`, 'retiros-aviso-ok');
+
+      const buscador = document.getElementById('f-buscar');
+      buscador.value = '';
+      pintarListas();
+      buscador.focus();
     }
 
     // ── Comentarios del día ──────────────────────────────────────
