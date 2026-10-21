@@ -127,22 +127,69 @@ async function listAuditoria(pedidoId) {
   return result.rows;
 }
 
+// Las fechas de entrega de las líneas VIVAS de cada pedido, agregadas por
+// pedido. Una línea puntual aporta su fecha_entrega a las dos puntas; una
+// recurrente aporta fecha_desde al mínimo y fecha_hasta al máximo.
+const SQL_FECHAS_LINEAS = `
+  SELECT
+    pedido_id,
+    MIN(COALESCE(fecha_entrega, fecha_desde)) AS desde,
+    MAX(COALESCE(fecha_entrega, fecha_hasta)) AS hasta
+  FROM pedido_detalle
+  WHERE cancelado = false
+  GROUP BY pedido_id
+`;
+
+// La ventana de entrega de un pedido, en SQL: las líneas vivas si tiene, la
+// cabecera si no. Es la misma regla que entregaEfectiva() más abajo — acá en
+// SQL porque el filtro por fecha de entrega se resuelve en la base.
+//
+// Las cuatro constantes asumen los alias `p` (pedidos) y `dl` (el agregado de
+// SQL_FECHAS_LINEAS): quien las reuse tiene que nombrar sus tablas igual.
+// routes/export.js las importa para filtrar el Excel con exactamente esta
+// regla, en lugar de volver a escribirla.
+const SQL_ENTREGA_DESDE = 'COALESCE(dl.desde, p.fecha_entrega_desde)';
+const SQL_ENTREGA_HASTA = 'COALESCE(dl.hasta, p.fecha_entrega_hasta)';
+// Para el solapamiento: cuando de la ventana se conoce una sola punta (pasa en
+// pedidos viejos cargados con fecha_entrega_desde y sin hasta) se la toma como
+// un día suelto, en lugar de dejar el pedido afuera del filtro.
+const SQL_ENTREGA_INICIO = `COALESCE(${SQL_ENTREGA_DESDE}, ${SQL_ENTREGA_HASTA})`;
+const SQL_ENTREGA_FIN    = `COALESCE(${SQL_ENTREGA_HASTA}, ${SQL_ENTREGA_DESDE})`;
+
 // Historial de pedidos con filtros (vista de pedidos para admin/operador).
-// filtros: { cliente_id, fecha_desde, fecha_hasta, estado, estado_pago, tipo_vianda,
-//            segmento, canal_origen } — todos opcionales.
+// filtros: { cliente_id, fecha_desde, fecha_hasta, fecha_tipo, estado, estado_pago,
+//            tipo_vianda, segmento, canal_origen } — todos opcionales.
 // estado se aplica al estado del CLIENTE (no del pago).
 // tipo_vianda acepta el sentinel 'sin_vianda' para filtrar pedidos sin vianda (tipo_vianda IS NULL).
+// fecha_tipo decide sobre qué fecha pesan fecha_desde/fecha_hasta: 'entrega'
+// (cuándo se entrega, que es lo que la ATC busca) o 'pedido' (cuándo se cargó).
+// Default 'pedido', para no cambiarle el resultado a ningún llamador que no lo
+// mande; la vista de pedidos manda 'entrega'.
 async function listFiltered({
-  cliente_id, fecha_desde, fecha_hasta, estado,
+  cliente_id, fecha_desde, fecha_hasta, fecha_tipo, estado,
   estado_pago, tipo_vianda, segmento, canal_origen,
 } = {}) {
   const where = [];
   const params = [];
   let idx = 1;
 
+  // El JOIN con las fechas de las líneas se arma solo cuando se filtra por
+  // entrega: en el resto de los casos sería un agregado de toda la tabla de
+  // líneas que nadie mira.
+  const porEntrega = fecha_tipo === 'entrega' && !!(fecha_desde || fecha_hasta);
+
   if (cliente_id)   { where.push(`p.cliente_id = $${idx++}`);    params.push(cliente_id); }
-  if (fecha_desde)  { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
-  if (fecha_hasta)  { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
+  if (porEntrega) {
+    // Solapamiento de rangos: entrega_desde <= hasta AND entrega_hasta >= desde.
+    // Con una sola de las dos fechas del filtro se aplica solo esa mitad.
+    // Un pedido sin entrega conocida no solapa con nada y queda afuera: no hay
+    // ninguna entrega suya que caiga en el rango pedido.
+    if (fecha_hasta) { where.push(`${SQL_ENTREGA_INICIO} <= $${idx++}`); params.push(fecha_hasta); }
+    if (fecha_desde) { where.push(`${SQL_ENTREGA_FIN} >= $${idx++}`);    params.push(fecha_desde); }
+  } else {
+    if (fecha_desde) { where.push(`p.fecha_pedido >= $${idx++}`); params.push(fecha_desde); }
+    if (fecha_hasta) { where.push(`p.fecha_pedido <= $${idx++}`); params.push(fecha_hasta); }
+  }
   if (estado)       { where.push(`c.estado = $${idx++}`);        params.push(estado); }
   if (estado_pago)  { where.push(`p.estado_pago = $${idx++}`);   params.push(estado_pago); }
   if (segmento)     { where.push(`c.segmento = $${idx++}`);      params.push(segmento); }
@@ -158,15 +205,49 @@ async function listFiltered({
     SELECT
       p.id, p.fecha_pedido, p.monto, p.monto_pagado, p.descripcion, p.estado_pago, p.tipo_vianda, p.cancelado,
       p.origen, p.semana_lunes,
+      -- Entrega de los pedidos sin líneas (los 765 anteriores a la fase 6):
+      -- conCalculadosDeLineas las usa de fallback.
+      p.fecha_entrega_desde, p.fecha_entrega_hasta,
       c.id AS cliente_id, c.nombre_completo, c.cedula, c.segmento, c.estado, c.canal_origen, c.empresa,
       c.tipo_envase
     FROM pedidos p
     JOIN clientes c ON c.id = p.cliente_id
+    ${porEntrega ? `LEFT JOIN (${SQL_FECHAS_LINEAS}) dl ON dl.pedido_id = p.id` : ''}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY p.fecha_pedido DESC, p.id DESC
   `;
   const filas = (await pool.query(sql, params)).rows;
-  return conEnvaseEfectivo(filas);
+  return conCalculadosDeLineas(filas);
+}
+
+// Los dos campos del listado de pedidos que no están en la tabla pedidos y
+// salen de sus líneas: el envase efectivo (fase 9) y la ventana de entrega
+// (fase 11). Los dos se resuelven con la MISMA consulta agregada —una por
+// página de resultados, no una por pedido—, que es lo que permite mostrar la
+// columna "Entrega" sin un N+1.
+async function conCalculadosDeLineas(filas) {
+  if (!filas.length) return filas;
+
+  const r = await pool.query(`
+    SELECT
+      pedido_id,
+      bool_or(tipo_envase_override IS NULL) AS hay_sin_override,
+      array_agg(DISTINCT tipo_envase_override)
+        FILTER (WHERE tipo_envase_override IS NOT NULL) AS overrides,
+      MIN(COALESCE(fecha_entrega, fecha_desde)) AS desde,
+      MAX(COALESCE(fecha_entrega, fecha_hasta)) AS hasta
+    FROM pedido_detalle
+    WHERE pedido_id = ANY($1::int[]) AND cancelado = false
+    GROUP BY pedido_id
+  `, [filas.map(f => f.id)]);
+
+  const porPedido = new Map(r.rows.map(row => [row.pedido_id, row]));
+
+  return filas.map(fila => ({
+    ...fila,
+    tipo_envase_efectivo: envaseEfectivo(fila.tipo_envase, porPedido.get(fila.id)),
+    ...entregaEfectiva(fila, porPedido.get(fila.id)),
+  }));
 }
 
 // Envase que hay que mostrar en el listado de pedidos (fase 9). Es el del
@@ -178,32 +259,8 @@ async function listFiltered({
 // por línea. Un pedido sin líneas (los anteriores a la fase 6) se queda con el
 // envase del cliente, que es el que aplicaría.
 //
-// Una sola consulta para toda la página de resultados, no una por pedido.
-async function conEnvaseEfectivo(filas) {
-  if (!filas.length) return filas;
-
-  const r = await pool.query(`
-    SELECT
-      pedido_id,
-      bool_or(tipo_envase_override IS NULL) AS hay_sin_override,
-      array_agg(DISTINCT tipo_envase_override)
-        FILTER (WHERE tipo_envase_override IS NOT NULL) AS overrides
-    FROM pedido_detalle
-    WHERE pedido_id = ANY($1::int[]) AND cancelado = false
-    GROUP BY pedido_id
-  `, [filas.map(f => f.id)]);
-
-  const porPedido = new Map(r.rows.map(row => [row.pedido_id, row]));
-
-  return filas.map(fila => ({
-    ...fila,
-    tipo_envase_efectivo: envaseEfectivo(fila.tipo_envase, porPedido.get(fila.id)),
-  }));
-}
-
-// La regla en sí, sin base de por medio para poder verificarla sola.
 // lineas: { hay_sin_override, overrides } del pedido, o undefined si no tiene
-// ninguna línea viva.
+// ninguna línea viva. Sin base de por medio, para poder verificar la regla sola.
 function envaseEfectivo(envaseCliente, lineas) {
   const envases = new Set();
   if (lineas) {
@@ -213,6 +270,39 @@ function envaseEfectivo(envaseCliente, lineas) {
   if (!envases.size) return envaseCliente;
   if (envases.size === 1) return [...envases][0];
   return 'Mixto';
+}
+
+// Cuándo se entrega un pedido (fase 11). La entrega vive en las líneas desde
+// la fase 6, pero 765 de los 775 pedidos son anteriores y la tienen solo en la
+// cabecera, así que la regla es: si hay líneas vivas mandan ellas, si no manda
+// la cabecera, y si no hay nada queda null.
+//
+// cabecera: la fila de pedidos (se leen fecha_entrega_desde / fecha_entrega_hasta).
+// lineas: { desde, hasta } agregado de las líneas vivas, o undefined si no tiene
+// ninguna. Sin base de por medio, igual que envaseEfectivo.
+function entregaEfectiva(cabecera, lineas) {
+  const desde = (lineas && lineas.desde) || cabecera.fecha_entrega_desde || null;
+  const hasta = (lineas && lineas.hasta) || cabecera.fecha_entrega_hasta || null;
+  return {
+    entrega_desde: detalle.aISO(desde),
+    entrega_hasta: detalle.aISO(hasta),
+  };
+}
+
+// Las mismas dos puntas que calcula SQL_FECHAS_LINEAS, pero sobre líneas que ya
+// están en memoria: lo usa getConDetalle, que acaba de leerlas, para no volver
+// a la base por algo que ya tiene.
+function fechasDeLineas(lineas = []) {
+  let desde = null;
+  let hasta = null;
+  for (const l of lineas) {
+    if (l.cancelado) continue;
+    const d = detalle.aISO(l.fecha_entrega || l.fecha_desde);
+    const h = detalle.aISO(l.fecha_entrega || l.fecha_hasta);
+    if (d && (desde === null || d < desde)) desde = d;
+    if (h && (hasta === null || h > hasta)) hasta = h;
+  }
+  return (desde || hasta) ? { desde, hasta } : undefined;
 }
 
 // Cantidad de pedidos de vianda (tipo_vianda IS NOT NULL) cuya fecha_pedido cae
@@ -378,6 +468,11 @@ async function getConDetalle(id) {
     excepciones: excepcionesPorLinea.get(l.id) || [],
   }));
 
+  // entrega_desde / entrega_hasta con la misma regla que el listado, para que
+  // el encabezado del detalle no muestre una entrega distinta de la columna
+  // "Entrega" del mismo pedido.
+  Object.assign(pedido, entregaEfectiva(pedido, fechasDeLineas(pedido.lineas)));
+
   return pedido;
 }
 
@@ -385,7 +480,10 @@ module.exports = {
   listByCliente, getById, getConDetalle, create, listFiltered, updatePago,
   countRecepcionadas, countEntregadas, countCortesia, viandasPorTipoPorSemana,
   update, cancelar, listAuditoria, auditar,
-  // exportada para poder verificar la regla del envase del listado sin pedidos
-  // de prueba en la base
-  envaseEfectivo,
+  // exportadas para poder verificar las reglas del listado (qué envase y qué
+  // ventana de entrega muestra un pedido) sin pedidos de prueba en la base
+  envaseEfectivo, entregaEfectiva, fechasDeLineas,
+  // los pedazos de SQL de la ventana de entrega, para que el export de Excel
+  // filtre con la MISMA regla que el listado y no con una copia
+  SQL_FECHAS_LINEAS, SQL_ENTREGA_INICIO, SQL_ENTREGA_FIN,
 };

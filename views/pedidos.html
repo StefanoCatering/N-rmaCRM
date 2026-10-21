@@ -24,6 +24,13 @@
         <div class="filter-row">
           <input type="text" id="f-cliente" list="lista-clientes" placeholder="Buscar cliente por nombre o cédula..."/>
           <datalist id="lista-clientes"></datalist>
+          <!-- Sobre qué fecha pesan los dos inputs de abajo. Entrega por
+               defecto: lo que la ATC busca es qué se entrega en esos días, no
+               cuándo se cargó el pedido. -->
+          <select id="f-fecha-tipo" title="Sobre qué fecha se aplica el rango de fechas">
+            <option value="entrega">Filtrar por: Entrega</option>
+            <option value="pedido">Filtrar por: Pedido</option>
+          </select>
           <input type="date" id="f-fecha-desde" title="Fecha desde"/>
           <input type="date" id="f-fecha-hasta" title="Fecha hasta"/>
           <select id="f-estado">
@@ -101,12 +108,20 @@
   <div id="modal-editar-pedido" class="hidden" style="position:fixed;inset:0;background:rgba(8,43,85,0.45);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px;">
     <div class="card" style="max-width:360px;width:100%;">
       <div class="card-title">editar pedido</div>
+      <!-- La entrega no se edita acá: vive en las líneas del pedido (fase 6).
+           Se muestra para que no se la confunda con la fecha de carga, que es
+           lo único que este modal cambia, y se manda al detalle para tocarla. -->
+      <div class="form-group">
+        <label class="form-label">Entrega</label>
+        <div class="cliente-info-value" id="modal-editar-entrega">—</div>
+        <a href="#" id="modal-editar-link-entrega" class="nota mt-8" style="display:inline-block;">Cambiar fecha de entrega →</a>
+      </div>
       <div class="form-group">
         <label class="form-label">Monto (Gs.)</label>
         <input type="number" id="modal-editar-monto" step="1" min="1"/>
       </div>
       <div class="form-group">
-        <label class="form-label">Fecha de pedido</label>
+        <label class="form-label">Fecha en que se cargó el pedido</label>
         <input type="date" id="modal-editar-fecha"/>
       </div>
       <div class="form-group">
@@ -162,7 +177,7 @@
 
       cargarPedidos();
 
-      ['f-fecha-desde', 'f-fecha-hasta', 'f-estado', 'f-estado-pago', 'f-tipo-vianda', 'f-segmento', 'f-canal'].forEach(id => {
+      ['f-fecha-tipo', 'f-fecha-desde', 'f-fecha-hasta', 'f-estado', 'f-estado-pago', 'f-tipo-vianda', 'f-segmento', 'f-canal'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarPedidos);
       });
 
@@ -177,6 +192,7 @@
 
       document.getElementById('btn-limpiar-filtros').addEventListener('click', () => {
         document.getElementById('f-cliente').value = '';
+        document.getElementById('f-fecha-tipo').value = 'entrega';
         document.getElementById('f-fecha-desde').value = '';
         document.getElementById('f-fecha-hasta').value = '';
         document.getElementById('f-estado').value = '';
@@ -268,6 +284,10 @@
       document.getElementById('modal-editar-monto').value = pedidoEditandoDatos.monto;
       document.getElementById('modal-editar-fecha').value = pedidoEditandoDatos.fecha_pedido;
       document.getElementById('modal-editar-tipo-vianda').value = pedidoEditandoDatos.tipo_vianda;
+      document.getElementById('modal-editar-entrega').textContent =
+        fmtEntrega(ds.entregaDesde, ds.entregaHasta);
+      document.getElementById('modal-editar-link-entrega').href =
+        `/pedidos/${pedidoEditandoDatos.id}/editar`;
       document.getElementById('modal-editar-motivo').value = '';
       document.getElementById('modal-editar-error').classList.add('hidden');
       document.getElementById('modal-editar-pedido').classList.remove('hidden');
@@ -374,6 +394,10 @@
       const canal = document.getElementById('f-canal').value;
       if (desde) params.set('fecha_desde', desde);
       if (hasta) params.set('fecha_hasta', hasta);
+      // Solo cuando hay alguna fecha: sin rango no hay nada sobre qué elegir
+      // una fecha u otra. Estos params también son los del botón Exportar, que
+      // filtra el Excel por lo mismo que la pantalla (ver routes/export.js).
+      if (desde || hasta) params.set('fecha_tipo', document.getElementById('f-fecha-tipo').value);
       if (estado) params.set('estado', estado);
       if (estadoPago) params.set('estado_pago', estadoPago);
       if (tipoVianda) params.set('tipo_vianda', tipoVianda);
@@ -405,7 +429,7 @@
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>Cliente</th><th>Segmento</th><th>Envase</th><th>Fecha pedido</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${puedeEditarPedido ? '<th>Acciones</th>' : ''}</tr>
+                <tr><th>Cliente</th><th>Segmento</th><th>Envase</th><th>Fecha pedido</th><th>Entrega</th><th>Monto</th><th>Estado pago</th><th>Descripción</th>${puedeEditarPedido ? '<th>Acciones</th>' : ''}</tr>
               </thead>
               <tbody>
                 ${pedidos.map(p => {
@@ -424,6 +448,10 @@
                       ? '<span class="badge badge-warning">Mixto</span>'
                       : escapeHtml(p.tipo_envase_efectivo || '—')}</td>
                     <td>${fmtFecha(p.fecha_pedido)}</td>
+                    <!-- Cuándo se entrega: sale de las líneas vivas y, en los
+                         pedidos anteriores a la fase 6 que no tienen líneas, de
+                         la cabecera (ver entregaEfectiva en models/pedidos.js). -->
+                    <td style="white-space:nowrap;">${fmtEntrega(p.entrega_desde, p.entrega_hasta)}</td>
                     <td><strong>${deGrilla ? '<span class="text-muted">—</span>' : fmtGs(p.monto)}</strong></td>
                     <td style="white-space:nowrap;">
                       ${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : `
@@ -437,7 +465,7 @@
                         : `<a href="/pedidos/${p.id}/editar" class="nota" style="display:block;margin-top:4px;">líneas y excepciones →</a>`}</td>
                     ${puedeEditarPedido ? `<td style="white-space:nowrap;">
                       ${!p.cancelado && !deGrilla ? `
-                        <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
+                        <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" data-entrega-desde="${p.entrega_desde || ''}" data-entrega-hasta="${p.entrega_hasta || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
                         <button class="btn-secondary btn-cancelar-pedido" data-id="${p.id}" style="padding:2px 8px;font-size:9px;margin-left:4px;">Cancelar</button>
                       ` : ''}
                       ${deGrilla ? '<span class="text-muted" style="font-size:9px;">Se gestiona desde la grilla</span>' : ''}

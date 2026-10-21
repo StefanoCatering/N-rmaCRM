@@ -197,6 +197,8 @@
           <div class="cliente-info-value">${SEGMENTO_LABEL[p.cliente_segmento] || p.cliente_segmento}</div></div>
         <div class="cliente-info-item"><span class="form-label">Envase del cliente</span>
           <div class="cliente-info-value">${escapeHtml(envase)}</div></div>
+        <div class="cliente-info-item"><span class="form-label">Entrega</span>
+          <div class="cliente-info-value">${fmtEntrega(p.entrega_desde, p.entrega_hasta)}</div></div>
         <div class="cliente-info-item"><span class="form-label">Fecha del pedido</span>
           <div class="cliente-info-value">${fmtFecha(p.fecha_pedido)}</div></div>
         <div class="cliente-info-item"><span class="form-label">Monto</span>
@@ -261,9 +263,20 @@
         </optgroup>`).join('');
     }
 
+    // Cuándo se entrega esta línea. Va al lado del plato y en negrita, no como
+    // nota gris al pie de la tarjeta: en un pedido con varias líneas es el dato
+    // que las distingue, y leerlo al final era el principal reclamo de la ATC.
     function fechasLinea(l) {
-      if (l.modo === 'puntual') return fmtFecha(l.fecha_entrega);
-      return `${fmtFecha(l.fecha_desde)} → ${fmtFecha(l.fecha_hasta)} <span class="text-muted">(lun a vie)</span>`;
+      if (l.modo === 'puntual') return `<strong>${fmtFecha(l.fecha_entrega)}</strong>`;
+      return `<strong>${fmtFecha(l.fecha_desde)} → ${fmtFecha(l.fecha_hasta)}</strong>`
+        + ' <span class="text-muted">(lun a vie)</span>';
+    }
+
+    // Cuánto lleva la línea. En una recurrente la cantidad es POR DÍA: se
+    // repite en cada día hábil del rango, así que "x10" daría a entender un
+    // total que no es.
+    function cantidadLinea(l) {
+      return l.modo === 'recurrente' ? `${l.cantidad} por día` : `x${l.cantidad}`;
     }
 
     function renderLineas() {
@@ -283,12 +296,12 @@
         <div class="card" style="padding:12px;margin-bottom:10px;" data-linea="${l.id}">
           <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
             <strong>${escapeHtml(l.plato_etiqueta)}</strong>
-            <span class="badge badge-neutral">x${l.cantidad}</span>
+            <span>${fechasLinea(l)}</span>
+            <span class="badge badge-neutral">${cantidadLinea(l)}</span>
             <span class="badge ${l.modo === 'recurrente' ? 'badge-info' : 'badge-neutral'}">${l.modo}</span>
             ${l.cancelado ? '<span class="badge badge-danger">Cancelada</span>' : ''}
             ${l.tipo_envase_override ? `<span class="badge badge-warning">envase: ${escapeHtml(l.tipo_envase_override)}</span>` : ''}
           </div>
-          <div class="nota mt-8">${fechasLinea(l)}</div>
           ${l.comentario ? `<div class="nota mt-8">“${escapeHtml(l.comentario)}”</div>` : ''}
 
           ${editable ? `
@@ -407,8 +420,9 @@
             <select class="ed-plato">${opcionesPlatos(l.plato_id)}</select>
           </div>
           <div class="form-group">
-            <label class="form-label">Cantidad</label>
+            <label class="form-label ed-cantidad-label">Cantidad</label>
             <input type="number" class="ed-cantidad" min="1" step="1" value="${l.cantidad}"/>
+            <div class="nota mt-8 ed-total hidden"></div>
           </div>
         </div>
         <div class="form-row">
@@ -454,11 +468,34 @@
       cont.classList.remove('hidden');
 
       const selModo = cont.querySelector('.ed-modo');
+
+      // En recurrente la cantidad es POR DÍA (se repite en cada día hábil del
+      // rango): la etiqueta lo dice y el total se recalcula en vivo.
+      function refrescarCantidadPorDia() {
+        const r = selModo.value === 'recurrente';
+        cont.querySelector('.ed-cantidad-label').textContent = r ? 'Cantidad por día' : 'Cantidad';
+        const box = cont.querySelector('.ed-total');
+        const texto = r
+          ? textoTotalRecurrente(
+            cont.querySelector('.ed-fecha-desde').value,
+            cont.querySelector('.ed-fecha-hasta').value,
+            cont.querySelector('.ed-cantidad').value
+          )
+          : '';
+        box.textContent = texto;
+        box.classList.toggle('hidden', !texto);
+      }
+
       selModo.addEventListener('change', () => {
         const r = selModo.value === 'recurrente';
         cont.querySelector('.ed-grupo-puntual').classList.toggle('hidden', r);
         cont.querySelector('.ed-grupo-recurrente').classList.toggle('hidden', !r);
+        refrescarCantidadPorDia();
       });
+      ['.ed-cantidad', '.ed-fecha-desde', '.ed-fecha-hasta'].forEach(sel => {
+        cont.querySelector(sel).addEventListener('input', refrescarCantidadPorDia);
+      });
+      refrescarCantidadPorDia();
 
       cont.querySelector('.ed-guardar').addEventListener('click', () => {
         const modo = selModo.value;
@@ -519,8 +556,9 @@
             <select class="n-plato"><option value="">— Elegir —</option>${opcionesPlatos(null)}</select>
           </div>
           <div class="form-group">
-            <label class="form-label">Cantidad</label>
+            <label class="form-label n-cantidad-label">Cantidad</label>
             <input type="number" class="n-cantidad" min="1" step="1" placeholder="Ej: 10"/>
+            <div class="nota mt-8 n-total hidden"></div>
           </div>
         </div>
         <div class="form-row">
@@ -562,10 +600,32 @@
 
       const cont = document.getElementById('nueva-linea');
       const selModo = cont.querySelector('.n-modo');
+
+      // Misma regla que en el editor de una línea existente: en recurrente la
+      // cantidad es por día y lo que importa saber antes de guardar es el total.
+      function refrescarCantidadPorDia() {
+        const r = selModo.value === 'recurrente';
+        cont.querySelector('.n-cantidad-label').textContent = r ? 'Cantidad por día' : 'Cantidad';
+        const box = cont.querySelector('.n-total');
+        const texto = r
+          ? textoTotalRecurrente(
+            cont.querySelector('.n-fecha-desde').value,
+            cont.querySelector('.n-fecha-hasta').value,
+            cont.querySelector('.n-cantidad').value
+          )
+          : '';
+        box.textContent = texto;
+        box.classList.toggle('hidden', !texto);
+      }
+
       selModo.addEventListener('change', () => {
         const r = selModo.value === 'recurrente';
         cont.querySelector('.n-grupo-puntual').classList.toggle('hidden', r);
         cont.querySelector('.n-grupo-recurrente').classList.toggle('hidden', !r);
+        refrescarCantidadPorDia();
+      });
+      ['.n-cantidad', '.n-fecha-desde', '.n-fecha-hasta'].forEach(sel => {
+        cont.querySelector(sel).addEventListener('input', refrescarCantidadPorDia);
       });
     }
 

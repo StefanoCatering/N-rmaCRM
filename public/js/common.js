@@ -35,6 +35,69 @@ function fmtFecha(iso) {
   return `${d}/${m}/${y}`;
 }
 
+// La ventana de entrega de un pedido, como la muestran el listado, el modal de
+// edición y el encabezado del detalle: una sola fecha cuando empieza y termina
+// el mismo día, el rango cuando no, y "—" cuando el pedido no tiene entrega
+// cargada (ver entregaEfectiva en models/pedidos.js).
+// Si de la ventana se conoce una sola punta, se la muestra como un día suelto
+// en lugar de dejar un "→ —" colgado.
+function fmtEntrega(desde, hasta) {
+  const d = desde || hasta;
+  const h = hasta || desde;
+  if (!d) return '—';
+  if (String(d).slice(0, 10) === String(h).slice(0, 10)) return fmtFecha(d);
+  return `${fmtFecha(d)} → ${fmtFecha(h)}`;
+}
+
+// ── Días hábiles de un rango ──────────────────────────────────────
+// Misma definición que expandirHabiles en models/pedidoDetalle.js: lunes a
+// viernes, bordes incluidos. Una línea recurrente entrega su cantidad en CADA
+// uno de estos días, así que es lo que multiplica el total que se muestra al
+// cargarla.
+//
+// La aritmética va en UTC (sumar 86.400.000 ms es exacto porque UTC no tiene
+// horario de verano) para que el huso de la máquina del navegador no corra un
+// día, igual que en el backend. Las semanas completas se cuentan de una
+// (7 días = 5 hábiles) y solo el resto —a lo sumo 6 días— se recorre, así un
+// rango mal tipeado (2026 → 2036) no cuelga la pantalla.
+const UN_DIA_MS_UI = 24 * 60 * 60 * 1000;
+
+function msUTCDesdeISO(iso) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+function contarHabiles(desdeISO, hastaISO) {
+  if (!desdeISO || !hastaISO) return 0;
+  const inicio = msUTCDesdeISO(desdeISO);
+  const fin = msUTCDesdeISO(hastaISO);
+  if (!Number.isFinite(inicio) || !Number.isFinite(fin) || fin < inicio) return 0;
+
+  const dias = Math.round((fin - inicio) / UN_DIA_MS_UI) + 1;
+  const semanas = Math.floor(dias / 7);
+  let habiles = semanas * 5;
+  for (let i = semanas * 7; i < dias; i++) {
+    const dow = new Date(inicio + i * UN_DIA_MS_UI).getUTCDay();
+    if (dow >= 1 && dow <= 5) habiles++;
+  }
+  return habiles;
+}
+
+// El texto que acompaña a "Cantidad por día" en una línea recurrente: la
+// cantidad se repite en cada día hábil del rango, así que lo que importa saber
+// antes de guardar es el TOTAL de viandas que se van a producir.
+// Devuelve '' cuando todavía no hay con qué calcularlo (sin fechas o sin
+// cantidad), para no mostrar un cálculo a medias.
+function textoTotalRecurrente(desdeISO, hastaISO, cantidad) {
+  const c = Number(cantidad);
+  if (!desdeISO || !hastaISO || !Number.isFinite(c) || c <= 0) return '';
+  const dias = contarHabiles(desdeISO, hastaISO);
+  if (!dias) return '';
+  const total = dias * c;
+  return `${dias} día${dias === 1 ? '' : 's'} hábil${dias === 1 ? '' : 'es'}`
+    + ` × ${c} = ${total} vianda${total === 1 ? '' : 's'}`;
+}
+
 function initials(nombre) {
   if (!nombre) return '?';
   const partes = nombre.trim().split(/\s+/);
