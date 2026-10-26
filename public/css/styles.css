@@ -661,3 +661,62 @@ input:focus, select:focus, textarea:focus { border-color: var(--orange); backgro
   .retiros-deshacer:hover:not(:disabled) { color: var(--orange); }
   .retiros-deshacer:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
 }
+
+/* ══════════════════════════════════════════════════════
+   PLANILLA SEMANAL (fase 14)
+   La tabla para cargar una semana irregular de líneas de pedido. Vive en
+   public/js/planilla-semanal.js y la usan el alta de pedido y el detalle.
+   ══════════════════════════════════════════════════════ */
+.planilla-barra { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.planilla-semana { font-size: 11px; font-weight: 600; color: var(--navy); }
+.planilla-nav { padding: 7px 11px; font-size: 11px; }
+
+/* Entra justa en el ancho del form de pedido (560px menos el padding de la
+   tarjeta); más angosto que eso, scrollea DENTRO de .table-wrap. */
+.planilla-tabla { table-layout: fixed; min-width: 486px; }
+.planilla-tabla th, .planilla-tabla td { padding: 5px 4px; }
+/* En porcentajes y no en px: así suman exactamente el ancho del contenedor y
+   no sobra un píxel que dispare la barra de scroll cuando la tabla sí entra.
+   Debajo de min-width, scrollea dentro de .table-wrap. */
+.planilla-col-plato { width: 29%; }
+.planilla-col-dia   { width: 11%; text-align: center; }
+.planilla-col-mini  { width: 7%;  text-align: center; }
+.planilla-col-total { width: 9%;  text-align: center; }
+
+.planilla-dia-nombre { font-size: 10px; font-weight: 600; color: var(--navy); text-transform: uppercase; }
+.planilla-dia-fecha  { font-size: 9px; color: var(--text3); font-weight: 400; }
+/* Hoy y los días anteriores: ya se produjeron de madrugada y no se cargan. */
+.planilla-dia-cerrado .planilla-dia-nombre,
+.planilla-dia-cerrado .planilla-dia-fecha { color: var(--text3); opacity: 0.55; }
+.planilla-td-cerrado { background: repeating-linear-gradient(45deg, rgba(8,43,85,0.04), rgba(8,43,85,0.04) 6px, transparent 6px, transparent 12px); }
+
+/* El selector lleva el `input`/`select` delante a propósito: la regla general
+   de arriba los matchea por atributo (input[type="number"]), que gana por
+   especificidad a una clase sola y dejaba la casilla con 14px de padding y el
+   número recortado. */
+.planilla-tabla select.planilla-plato { padding: 7px 9px; font-size: 11px; }
+.planilla-tabla input.planilla-cant {
+  width: 100%; padding: 7px 2px; text-align: center;
+  font-size: 12px; font-weight: 600;
+}
+.planilla-tabla input.planilla-cant:disabled { background: var(--beige); color: var(--text3); opacity: 0.6; cursor: default; }
+/* Sin flechitas: en una columna de 54px se comen la mitad del ancho y acá se
+   tipea, no se incrementa de a uno. Las flechas del teclado siguen andando. */
+.planilla-tabla input.planilla-cant::-webkit-outer-spin-button,
+.planilla-tabla input.planilla-cant::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.planilla-acciones { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+.planilla-mini {
+  padding: 2px 6px; border: 1px solid var(--border2); border-radius: 6px;
+  background: white; font-family: var(--font); font-size: 9px; font-weight: 500;
+  color: var(--text2); cursor: pointer; white-space: nowrap;
+}
+.planilla-mini:hover { background: var(--beige); }
+.planilla-repetir { font-size: 13px; line-height: 1; padding: 4px 6px; }
+
+.planilla-total { text-align: center; font-weight: 600; font-size: 11px; }
+.planilla-total-cero { color: var(--text3); font-weight: 400; }
+.planilla-fila-total td { background: var(--beige); font-weight: 600; }
+.planilla-fila-opciones td { white-space: normal; background: var(--beige); }
+.planilla-fila-opciones .form-group:last-child { margin-bottom: 0; }
+.planilla-fila-opciones .nota { margin-bottom: 0; }

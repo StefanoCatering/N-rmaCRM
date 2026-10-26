@@ -53,8 +53,18 @@
         <div class="form-group">
           <label class="form-label">Líneas del pedido</label>
           <div id="lineas"></div>
-          <button type="button" class="btn-secondary mt-8" id="btn-agregar-linea">+ Agregar línea</button>
+          <div class="btn-row">
+            <button type="button" class="btn-secondary" id="btn-agregar-linea">+ Agregar línea</button>
+            <button type="button" class="btn-secondary" id="btn-planilla">Cargar como planilla semanal</button>
+          </div>
           <div class="nota mt-8">Cada línea es un plato con su cantidad. "Recurrente" se entrega de lunes a viernes dentro del rango; los días sueltos se ajustan después con excepciones, desde la vista de edición del pedido.</div>
+
+          <!-- Planilla semanal (fase 14): para una semana irregular, en lugar
+               de cargar a mano una línea suelta por día. Lo que produce son
+               líneas puntuales normales, que se suman a las de arriba en el
+               mismo POST. -->
+          <div id="planilla" class="hidden mt-12"></div>
+          <div class="nota mt-8 hidden" id="planilla-resumen"></div>
         </div>
 
         <div class="form-row">
@@ -108,10 +118,18 @@
   </div>
 
   <script src="/js/common.js"></script>
+  <script src="/js/planilla-semanal.js"></script>
   <script>
     let timerBuscar = null;
     let clienteSeleccionado = null;
     let CATALOGO_PLATOS = [];
+    // La planilla se monta la primera vez que se la muestra: recién ahí se sabe
+    // qué cliente está elegido, que es lo que define la etiqueta del envase.
+    let planillaMontada = false;
+    let planillaVisible = false;
+    // El mismo techo que MAX_LINEAS en routes/pedidos.js. Se chequea acá para
+    // frenar antes de enviar, con un mensaje que dice cómo salir del paso.
+    const MAX_LINEAS_POR_CARGA = 50;
 
     // Un cliente que no está activo no recibe pedidos nuevos (fase 11). El
     // buscador ya no los ofrece; esto cubre el caso de abrir la pantalla con
@@ -121,7 +139,7 @@
 
     (async function () {
       await ensureSession();
-      renderNav('/clientes');
+      renderNav('/pedidos');
 
       document.getElementById('f-fecha').value = new Date().toISOString().slice(0, 10);
 
@@ -171,6 +189,7 @@
       }
       document.getElementById('btn-agregar-linea').addEventListener('click', () => agregarLinea());
       agregarLinea();
+      document.getElementById('btn-planilla').addEventListener('click', alternarPlanilla);
 
       // Mismo control que el form de cliente (ver common.js), con la opción
       // extra "Según el cliente", que es lo normal.
@@ -240,6 +259,61 @@
       document.querySelectorAll('#lineas .l-envase option[value=""]').forEach(opt => {
         opt.textContent = texto;
       });
+      if (planillaMontada) actualizarEtiquetaEnvasePlanilla(texto, 'planilla');
+    }
+
+    // ── Planilla semanal ─────────────────────────────────────────
+    // Las líneas sueltas siguen siendo lo de siempre: la planilla es un modo
+    // de carga que se pide, no el que está puesto. Mientras está oculta no
+    // aporta ninguna línea, así que esconderla con cantidades cargadas vacía
+    // las cantidades — la misma regla que cambiar de semana, para que nunca se
+    // guarde algo que no está a la vista.
+    function alternarPlanilla() {
+      const box = document.getElementById('planilla');
+      const btn = document.getElementById('btn-planilla');
+
+      if (planillaVisible) {
+        if (planillaTieneCantidades('planilla')) {
+          const ok = confirm(
+            'Al ocultar la planilla se vacían las cantidades cargadas y no se van a guardar.\n\n'
+            + '¿Ocultarla igual?'
+          );
+          if (!ok) return;
+        }
+        vaciarPlanilla('planilla');
+        planillaVisible = false;
+        box.classList.add('hidden');
+        document.getElementById('planilla-resumen').classList.add('hidden');
+        btn.textContent = 'Cargar como planilla semanal';
+        return;
+      }
+
+      if (!planillaMontada) {
+        montarPlanilla('planilla', {
+          catalogo: CATALOGO_PLATOS,
+          etiquetaEnvase: etiquetaEnvaseCliente(),
+          onCambio: refrescarResumenPlanilla,
+        });
+        planillaMontada = true;
+      }
+      planillaVisible = true;
+      box.classList.remove('hidden');
+      btn.textContent = 'Ocultar planilla';
+      refrescarResumenPlanilla(resumenPlanilla('planilla'));
+    }
+
+    // Cuántas líneas va a crear la planilla, en vivo: en una tabla de casillas
+    // es fácil perder la cuenta, y el techo de 50 líneas por carga se toca
+    // antes de lo que parece.
+    function refrescarResumenPlanilla(resumen) {
+      const box = document.getElementById('planilla-resumen');
+      if (!planillaVisible || !resumen.lineas) {
+        box.classList.add('hidden');
+        return;
+      }
+      box.textContent = `Se van a crear ${resumen.lineas} línea${resumen.lineas === 1 ? '' : 's'}`
+        + ` (${resumen.viandas} vianda${resumen.viandas === 1 ? '' : 's'}).`;
+      box.classList.remove('hidden');
     }
 
     function opcionesPlatos() {
@@ -465,6 +539,30 @@
       // parcial → se envía el monto abonado ingresado
       const monto_pagado = estadoPago === 'parcial' ? parseInt(montoPagadoStr, 10) : null;
 
+      // Las líneas sueltas y las de la planilla van juntas en un solo POST.
+      // La planilla oculta no aporta nada (ver alternarPlanilla).
+      let lineasPlanilla = [];
+      if (planillaVisible) {
+        const leido = leerPlanilla('planilla');
+        if (leido.error) {
+          errorBox.textContent = leido.error;
+          errorBox.classList.remove('hidden');
+          return;
+        }
+        lineasPlanilla = leido.lineas;
+      }
+      const lineas = recolectarLineas().concat(lineasPlanilla);
+
+      // El backend rechaza el request entero si pasa de MAX_LINEAS, así que se
+      // frena acá: enviarlo solo cambiaría este mensaje por uno que no dice
+      // cómo seguir.
+      if (lineas.length > MAX_LINEAS_POR_CARGA) {
+        errorBox.textContent = `Son ${lineas.length} líneas y el máximo por carga es ${MAX_LINEAS_POR_CARGA}:`
+          + ' guardá el pedido con menos días y agregá el resto desde el detalle del pedido.';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
       const payload = {
         cliente_id: clienteSeleccionado.id,
         fecha_pedido: document.getElementById('f-fecha').value,
@@ -474,7 +572,7 @@
         medio_pago: document.getElementById('f-medio-pago').value,
         descripcion: document.getElementById('f-descripcion').value.trim(),
         ubicacion_id: document.getElementById('f-ubicacion').value || null,
-        lineas: recolectarLineas(),
+        lineas,
       };
 
       const destino = leerFacturacionDestino('fact-ped');
