@@ -61,6 +61,16 @@
         <div id="nueva-linea"></div>
         <div class="btn-row mt-8">
           <button class="btn-primary" id="btn-agregar-linea">Agregar línea</button>
+          <button class="btn-secondary" id="btn-planilla">Agregar semana (planilla)</button>
+        </div>
+
+        <!-- Planilla semanal (fase 14): una semana entera de líneas puntuales
+             en un solo POST y con un solo motivo. Vive fuera de #nueva-linea
+             porque esa tarjeta se redibuja en cada carga del pedido. -->
+        <div id="planilla" class="hidden mt-12"></div>
+        <div class="nota mt-8 hidden" id="planilla-resumen"></div>
+        <div class="btn-row mt-8 hidden" id="planilla-acciones">
+          <button class="btn-primary" id="btn-guardar-planilla">Agregar las líneas de la semana</button>
         </div>
       </div>
 
@@ -90,12 +100,19 @@
   </div>
 
   <script src="/js/common.js"></script>
+  <script src="/js/planilla-semanal.js"></script>
   <script>
     const PEDIDO_ID = Number(window.location.pathname.split('/')[2]);
     let PEDIDO = null;
     let CLIENTE = null;   // el cliente del pedido, con su facturación resuelta
     let CATALOGO_PLATOS = [];
     let accionPendiente = null; // callback que espera el motivo
+    // La planilla se monta la primera vez que se la muestra, cuando el pedido
+    // ya está cargado y se conoce el envase del cliente.
+    let planillaMontada = false;
+    let planillaVisible = false;
+    // El mismo techo que MAX_LINEAS en routes/pedidos.js.
+    const MAX_LINEAS_POR_CARGA = 50;
 
     (async function () {
       await ensureSession();
@@ -117,6 +134,8 @@
       // después cada carga solo le pone los valores del pedido.
       montarFacturacionDestino('facturacion-destino', { prefijo: 'fact-ped', conSegunCliente: true });
       document.getElementById('btn-agregar-linea').addEventListener('click', agregarLinea);
+      document.getElementById('btn-planilla').addEventListener('click', alternarPlanilla);
+      document.getElementById('btn-guardar-planilla').addEventListener('click', agregarSemana);
 
       await cargar();
     })();
@@ -683,6 +702,91 @@
           method: 'POST', body: { lineas: [linea], motivo },
         });
         avisarSync(r.sync);
+        await cargar();
+      });
+    }
+
+    // ── Agregar una semana con la planilla ───────────────────────
+    // Mismas reglas de visibilidad que "agregar línea": el botón vive dentro
+    // de #card-agregar, que se oculta entero cuando el pedido está cancelado,
+    // es de grilla o el usuario es visor.
+
+    function alternarPlanilla() {
+      const box = document.getElementById('planilla');
+      const btn = document.getElementById('btn-planilla');
+
+      if (planillaVisible) {
+        if (planillaTieneCantidades('planilla')) {
+          const ok = confirm(
+            'Al ocultar la planilla se vacían las cantidades cargadas y no se van a guardar.\n\n'
+            + '¿Ocultarla igual?'
+          );
+          if (!ok) return;
+        }
+        ocultarPlanilla();
+        return;
+      }
+
+      if (!planillaMontada) {
+        montarPlanilla('planilla', {
+          catalogo: CATALOGO_PLATOS,
+          etiquetaEnvase: etiquetaEnvaseCliente(),
+          onCambio: refrescarResumenPlanilla,
+        });
+        planillaMontada = true;
+      }
+      planillaVisible = true;
+      box.classList.remove('hidden');
+      document.getElementById('planilla-acciones').classList.remove('hidden');
+      btn.textContent = 'Ocultar planilla';
+      refrescarResumenPlanilla(resumenPlanilla('planilla'));
+    }
+
+    function ocultarPlanilla() {
+      if (planillaMontada) vaciarPlanilla('planilla');
+      planillaVisible = false;
+      document.getElementById('planilla').classList.add('hidden');
+      document.getElementById('planilla-resumen').classList.add('hidden');
+      document.getElementById('planilla-acciones').classList.add('hidden');
+      document.getElementById('btn-planilla').textContent = 'Agregar semana (planilla)';
+    }
+
+    function refrescarResumenPlanilla(resumen) {
+      const box = document.getElementById('planilla-resumen');
+      if (!planillaVisible || !resumen.lineas) {
+        box.classList.add('hidden');
+        return;
+      }
+      box.textContent = `Se van a crear ${resumen.lineas} línea${resumen.lineas === 1 ? '' : 's'}`
+        + ` (${resumen.viandas} vianda${resumen.viandas === 1 ? '' : 's'}).`;
+      box.classList.remove('hidden');
+    }
+
+    // Toda la semana entra en UN pedirMotivo y UN POST: son líneas de un mismo
+    // cambio, así que la auditoría guarda un solo lineas_agregadas con todas
+    // en lugar de una fila por día.
+    function agregarSemana() {
+      const leido = leerPlanilla('planilla');
+      if (leido.error) { mostrarError(leido.error); return; }
+      if (!leido.lineas.length) {
+        mostrarError('La planilla no tiene ninguna cantidad cargada.');
+        return;
+      }
+      if (leido.lineas.length > MAX_LINEAS_POR_CARGA) {
+        mostrarError(`Son ${leido.lineas.length} líneas y el máximo por carga es ${MAX_LINEAS_POR_CARGA}:`
+          + ' guardá el pedido con menos días y agregá el resto desde el detalle del pedido.');
+        return;
+      }
+      limpiarError();
+
+      pedirMotivo('agregar semana', async (motivo) => {
+        const r = await api(`/api/pedidos/${PEDIDO_ID}/lineas`, {
+          method: 'POST', body: { lineas: leido.lineas, motivo },
+        });
+        avisarSync(r.sync);
+        // La semana ya quedó guardada: dejarla cargada invitaría a guardarla
+        // dos veces.
+        ocultarPlanilla();
         await cargar();
       });
     }
