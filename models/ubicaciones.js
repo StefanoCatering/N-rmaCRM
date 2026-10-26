@@ -16,49 +16,57 @@ async function listByCliente(clienteId) {
 // referencia ubicaciones(id), y un DELETE de todas las filas en cada edición de
 // cliente dejaba en NULL (por el ON DELETE SET NULL) la ubicación de todos los
 // pedidos de ese cliente, aunque la dirección no hubiera cambiado.
-async function replaceForCliente(clienteId, ubicaciones) {
+//
+// ejecutor: cuando viene, las escrituras van sobre esa transacción ya abierta
+// y acá no se abre ninguna. Lo usa el alta de cliente con plan de comedor
+// (fase 12), que necesita que cliente, ubicaciones y plan sean todo o nada.
+async function replaceForCliente(clienteId, ubicaciones, ejecutor = null) {
+  if (ejecutor) return reemplazar(ejecutor, clienteId, ubicaciones);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    const existentes = (await client.query(
-      'SELECT id FROM ubicaciones WHERE cliente_id = $1 ORDER BY orden ASC, id ASC',
-      [clienteId]
-    )).rows;
-
-    let orden = 1;
-    for (const u of ubicaciones) {
-      const campos = [u.direccion || null, u.zona || null, u.referencia || null];
-      const existente = existentes[orden - 1];
-      if (existente) {
-        await client.query(
-          `UPDATE ubicaciones SET orden = $1, direccion = $2, zona = $3, referencia = $4
-           WHERE id = $5`,
-          [orden, ...campos, existente.id]
-        );
-      } else {
-        await client.query(
-          `INSERT INTO ubicaciones (cliente_id, orden, direccion, zona, referencia)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [clienteId, orden, ...campos]
-        );
-      }
-      orden++;
-    }
-
-    // Las que quedaron de más (el cliente tenía 3 y ahora tiene 2) sí se borran.
-    // Si alguna estaba referenciada por un pedido, el FK la pone en NULL.
-    const sobrantes = existentes.slice(ubicaciones.length).map(e => e.id);
-    if (sobrantes.length) {
-      await client.query('DELETE FROM ubicaciones WHERE id = ANY($1::int[])', [sobrantes]);
-    }
-
+    await reemplazar(client, clienteId, ubicaciones);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
   } finally {
     client.release();
+  }
+}
+
+async function reemplazar(client, clienteId, ubicaciones) {
+  const existentes = (await client.query(
+    'SELECT id FROM ubicaciones WHERE cliente_id = $1 ORDER BY orden ASC, id ASC',
+    [clienteId]
+  )).rows;
+
+  let orden = 1;
+  for (const u of ubicaciones) {
+    const campos = [u.direccion || null, u.zona || null, u.referencia || null];
+    const existente = existentes[orden - 1];
+    if (existente) {
+      await client.query(
+        `UPDATE ubicaciones SET orden = $1, direccion = $2, zona = $3, referencia = $4
+         WHERE id = $5`,
+        [orden, ...campos, existente.id]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO ubicaciones (cliente_id, orden, direccion, zona, referencia)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [clienteId, orden, ...campos]
+      );
+    }
+    orden++;
+  }
+
+  // Las que quedaron de más (el cliente tenía 3 y ahora tiene 2) sí se borran.
+  // Si alguna estaba referenciada por un pedido, el FK la pone en NULL.
+  const sobrantes = existentes.slice(ubicaciones.length).map(e => e.id);
+  if (sobrantes.length) {
+    await client.query('DELETE FROM ubicaciones WHERE id = ANY($1::int[])', [sobrantes]);
   }
 }
 

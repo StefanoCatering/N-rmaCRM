@@ -46,13 +46,6 @@
             <option value="pendiente">Pendiente</option>
             <option value="parcial">Parcial</option>
           </select>
-          <select id="f-tipo-vianda">
-            <option value="">Todas las viandas</option>
-            <option value="saludable">Saludable</option>
-            <option value="low_carb">Low Carb</option>
-            <option value="economico">Económico</option>
-            <option value="sin_vianda">Sin vianda</option>
-          </select>
           <select id="f-segmento">
             <option value="">Todos los segmentos</option>
             <option value="particular">Particular</option>
@@ -125,16 +118,6 @@
         <input type="date" id="modal-editar-fecha"/>
       </div>
       <div class="form-group">
-        <label class="form-label">Tipo de vianda</label>
-        <select id="modal-editar-tipo-vianda">
-          <option value="">— No especifica —</option>
-          <option value="economico">Económico</option>
-          <option value="saludable">Saludable</option>
-          <option value="low_carb">Low Carb</option>
-          <option value="modificacion_menu">Modificación de menú</option>
-        </select>
-      </div>
-      <div class="form-group">
         <label class="form-label">Motivo</label>
         <textarea id="modal-editar-motivo" placeholder="Motivo de la edición..."></textarea>
       </div>
@@ -177,7 +160,7 @@
 
       cargarPedidos();
 
-      ['f-fecha-tipo', 'f-fecha-desde', 'f-fecha-hasta', 'f-estado', 'f-estado-pago', 'f-tipo-vianda', 'f-segmento', 'f-canal'].forEach(id => {
+      ['f-fecha-tipo', 'f-fecha-desde', 'f-fecha-hasta', 'f-estado', 'f-estado-pago', 'f-segmento', 'f-canal'].forEach(id => {
         document.getElementById(id).addEventListener('change', cargarPedidos);
       });
 
@@ -197,7 +180,6 @@
         document.getElementById('f-fecha-hasta').value = '';
         document.getElementById('f-estado').value = '';
         document.getElementById('f-estado-pago').value = '';
-        document.getElementById('f-tipo-vianda').value = '';
         document.getElementById('f-segmento').value = '';
         document.getElementById('f-canal').value = '';
         clienteIdSeleccionado = null;
@@ -279,11 +261,9 @@
         id: Number(ds.id),
         monto: Number(ds.monto),
         fecha_pedido: ds.fecha,
-        tipo_vianda: ds.tipoVianda || '',
       };
       document.getElementById('modal-editar-monto').value = pedidoEditandoDatos.monto;
       document.getElementById('modal-editar-fecha').value = pedidoEditandoDatos.fecha_pedido;
-      document.getElementById('modal-editar-tipo-vianda').value = pedidoEditandoDatos.tipo_vianda;
       document.getElementById('modal-editar-entrega').textContent =
         fmtEntrega(ds.entregaDesde, ds.entregaHasta);
       document.getElementById('modal-editar-link-entrega').href =
@@ -307,13 +287,11 @@
 
       const montoStr = document.getElementById('modal-editar-monto').value.trim();
       const fecha = document.getElementById('modal-editar-fecha').value;
-      const tipoVianda = document.getElementById('modal-editar-tipo-vianda').value;
 
       const body = { motivo };
       const montoNum = parseInt(montoStr, 10);
       if (montoStr && montoNum !== pedidoEditandoDatos.monto) body.monto = montoNum;
       if (fecha && fecha !== pedidoEditandoDatos.fecha_pedido) body.fecha_pedido = fecha;
-      if (tipoVianda && tipoVianda !== pedidoEditandoDatos.tipo_vianda) body.tipo_vianda = tipoVianda;
 
       btn.disabled = true;
       try {
@@ -389,7 +367,6 @@
       const hasta = document.getElementById('f-fecha-hasta').value;
       const estado = document.getElementById('f-estado').value;
       const estadoPago = document.getElementById('f-estado-pago').value;
-      const tipoVianda = document.getElementById('f-tipo-vianda').value;
       const segmento = document.getElementById('f-segmento').value;
       const canal = document.getElementById('f-canal').value;
       if (desde) params.set('fecha_desde', desde);
@@ -400,7 +377,6 @@
       if (desde || hasta) params.set('fecha_tipo', document.getElementById('f-fecha-tipo').value);
       if (estado) params.set('estado', estado);
       if (estadoPago) params.set('estado_pago', estadoPago);
-      if (tipoVianda) params.set('tipo_vianda', tipoVianda);
       if (segmento) params.set('segmento', segmento);
       if (canal) params.set('canal_origen', canal);
       return params.toString();
@@ -465,7 +441,7 @@
                         : `<a href="/pedidos/${p.id}/editar" class="nota" style="display:block;margin-top:4px;">líneas y excepciones →</a>`}</td>
                     ${puedeEditarPedido ? `<td style="white-space:nowrap;">
                       ${!p.cancelado && !deGrilla ? `
-                        <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-tipo-vianda="${p.tipo_vianda || ''}" data-entrega-desde="${p.entrega_desde || ''}" data-entrega-hasta="${p.entrega_hasta || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
+                        <button class="btn-secondary btn-editar-pedido" data-id="${p.id}" data-monto="${p.monto}" data-fecha="${String(p.fecha_pedido).slice(0, 10)}" data-entrega-desde="${p.entrega_desde || ''}" data-entrega-hasta="${p.entrega_hasta || ''}" style="padding:2px 8px;font-size:9px;">Editar pedido</button>
                         <button class="btn-secondary btn-cancelar-pedido" data-id="${p.id}" style="padding:2px 8px;font-size:9px;margin-left:4px;">Cancelar</button>
                       ` : ''}
                       ${deGrilla ? '<span class="text-muted" style="font-size:9px;">Se gestiona desde la grilla</span>' : ''}

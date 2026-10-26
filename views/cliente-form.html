@@ -85,6 +85,34 @@
           <div class="nota mt-8">El cliente es la persona de contacto; acá indicás a qué empresa representa.</div>
         </div>
 
+        <!-- Comedor (fase 12). Solo aparece al CREAR, a quien gestiona la
+             grilla, y solo cuando la empresa escrita tiene comedor: así ATC
+             carga al colaborador de UENO una sola vez y no dos. -->
+        <div class="form-group hidden" id="grupo-comedor">
+          <label class="form-label">Comedor</label>
+          <label class="form-label" style="font-weight:normal;text-transform:none;">
+            <input type="checkbox" id="f-grilla-figura"/> Figura en la grilla
+          </label>
+          <div class="nota mt-8" id="nota-comedor"></div>
+
+          <div class="hidden mt-8" id="grupo-grilla-datos">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Plato base</label>
+                <select id="f-grilla-plato"></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Fecha de alta</label>
+                <input type="date" id="f-grilla-fecha"/>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Observación</label>
+              <input type="text" id="f-grilla-observacion" placeholder="Ej: no consume cerdo"/>
+            </div>
+          </div>
+        </div>
+
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Canal de origen</label>
@@ -188,6 +216,20 @@
     const esEdicion = !!matchEditar;
     const clienteIdEditar = esEdicion ? matchEditar[1] : null;
 
+    // ── Comedor ──────────────────────────────────────────────────
+    // Solo se cargan si quien está adelante gestiona la grilla Y está creando
+    // un cliente: en la edición el plan de comedor se toca desde la grilla,
+    // que es donde se ve el resto de la semana.
+    let EMPRESAS_GRILLA = [];   // empresas ACTIVAS con comedor configurado
+    let PLATOS_GRILLA = [];     // catálogo por persona (sin la categoría General)
+    let HOY_ASUNCION = null;    // qué día es hoy, según el servidor
+
+    // El plato que el comedor sirve por defecto. Mismo nombre que
+    // PLATO_ESTANDAR en models/grilla.js: es el plato base de casi todos, y
+    // dejar el select en el primero de la lista haría que se cargue cualquier
+    // cosa por no tocarlo.
+    const PLATO_BASE_DEFAULT = 'Estándar';
+
     let ubicacionesVisibles = 1;
 
     function mostrarSiguienteUbicacion() {
@@ -227,9 +269,14 @@
       const grupoEmpresa = document.getElementById('grupo-empresa');
       function actualizarEmpresa() {
         grupoEmpresa.classList.toggle('hidden', selSegmento.value !== 'empresa');
+        actualizarComedor();
       }
       selSegmento.addEventListener('change', actualizarEmpresa);
       actualizarEmpresa();
+
+      document.getElementById('f-empresa').addEventListener('input', actualizarComedor);
+      document.getElementById('f-grilla-figura').addEventListener('change', alTildarGrilla);
+      await cargarComedor();
 
       document.getElementById('btn-agregar-ubicacion').addEventListener('click', mostrarSiguienteUbicacion);
       document.getElementById('btn-agregar-telefono').addEventListener('click', mostrarSiguienteTelefono);
@@ -243,6 +290,83 @@
         await cargarCliente();
       }
     })();
+
+    // Trae las empresas con comedor y el catálogo de platos. Solo al crear y
+    // solo para quien gestiona la grilla: los dos endpoints le contestarían
+    // 403 a cualquier otro.
+    //
+    // Si algo falla, el bloque simplemente no aparece y el alta de cliente
+    // sigue andando: el comedor se puede cargar después desde la grilla, pero
+    // un cliente que no se puede dar de alta deja a la ATC sin salida.
+    async function cargarComedor() {
+      if (esEdicion || !CURRENT_USER.gestiona_grilla) return;
+      try {
+        const [datosGrilla, catalogo] = await Promise.all([
+          api('/api/grilla/empresas'),
+          api('/api/platos'),
+        ]);
+        EMPRESAS_GRILLA = datosGrilla.empresas || [];
+        HOY_ASUNCION = datosGrilla.hoy;
+        PLATOS_GRILLA = catalogo.categorias || [];
+        document.getElementById('f-grilla-plato').innerHTML = opcionesPlatosGrilla();
+        document.getElementById('f-grilla-fecha').value = HOY_ASUNCION;
+      } catch (e) {
+        EMPRESAS_GRILLA = [];
+      }
+      actualizarComedor();
+    }
+
+    // "Sin distinguir mayúsculas ni espacios": 'ueno bank', 'UENO BANK' y
+    // 'UenoBank' son la misma empresa a la hora de reconocerla. Lo que se
+    // GUARDA, en cambio, es siempre el nombre exacto de la grilla.
+    function normalizarEmpresa(valor) {
+      return String(valor || '').toLowerCase().replace(/\s+/g, '');
+    }
+
+    // La empresa con comedor que coincide con lo escrito, o null.
+    function empresaDeGrilla() {
+      if (document.getElementById('f-segmento').value !== 'empresa') return null;
+      const escrita = normalizarEmpresa(document.getElementById('f-empresa').value);
+      if (!escrita) return null;
+      return EMPRESAS_GRILLA.find(e => normalizarEmpresa(e.empresa) === escrita) || null;
+    }
+
+    function opcionesPlatosGrilla() {
+      return PLATOS_GRILLA.map(c => `
+        <optgroup label="${escapeHtml(c.categoria)}">
+          ${c.platos.map(p => `<option value="${p.id}"${p.nombre === PLATO_BASE_DEFAULT ? ' selected' : ''}>${escapeHtml(p.etiqueta)}</option>`).join('')}
+        </optgroup>`).join('');
+    }
+
+    // El bloque aparece y desaparece con lo que se escribe en "Empresa". Al
+    // desaparecer se destilda: si no, un alta a la grilla quedaría viajando
+    // para una empresa que ya no es la que dice el formulario.
+    function actualizarComedor() {
+      const emp = empresaDeGrilla();
+      const grupo = document.getElementById('grupo-comedor');
+      if (!grupo) return;
+      grupo.classList.toggle('hidden', !emp);
+      if (!emp) {
+        document.getElementById('f-grilla-figura').checked = false;
+      } else {
+        document.getElementById('nota-comedor').textContent =
+          `${emp.empresa} tiene comedor. Tildalo para que el colaborador entre en la grilla desde la fecha de alta.`;
+      }
+      document.getElementById('grupo-grilla-datos').classList
+        .toggle('hidden', !document.getElementById('f-grilla-figura').checked);
+    }
+
+    // Tildarlo deja el cliente listo para el comedor: envase Narma (todas las
+    // empresas con grilla tienen envase propio) y el nombre de la empresa
+    // escrito igual que en la grilla, que es lo que la hace aparecer en ella.
+    function alTildarGrilla() {
+      const emp = empresaDeGrilla();
+      if (document.getElementById('f-grilla-figura').checked && emp) {
+        document.getElementById('f-tipo-envase').value = 'Narma';
+        document.getElementById('f-empresa').value = emp.empresa;
+      }
+      actualizarComedor();
+    }
 
     async function cargarCliente() {
       const errorBox = document.getElementById('form-error');
@@ -319,6 +443,22 @@
         observaciones: document.getElementById('f-observaciones').value.trim(),
         ubicaciones: recolectarUbicaciones(),
       };
+
+      // Alta en la grilla junto con el cliente. El nombre exacto de la empresa
+      // se vuelve a pisar acá por si lo editaron después de tildar: el backend
+      // busca la empresa por nombre exacto.
+      const empComedor = !esEdicion && document.getElementById('f-grilla-figura').checked
+        ? empresaDeGrilla()
+        : null;
+      if (empComedor) {
+        payload.empresa = empComedor.empresa;
+        payload.tipo_envase = 'Narma';
+        payload.grilla = {
+          plato_base_id: Number(document.getElementById('f-grilla-plato').value),
+          fecha_alta: document.getElementById('f-grilla-fecha').value,
+          observacion: document.getElementById('f-grilla-observacion').value.trim() || null,
+        };
+      }
 
       const btn = document.getElementById('btn-guardar');
       btn.disabled = true;

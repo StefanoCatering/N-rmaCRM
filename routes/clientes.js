@@ -3,6 +3,11 @@ const clientes = require('../models/clientes');
 const pedidos = require('../models/pedidos');
 const detalle = require('../models/pedidoDetalle');
 const ubicaciones = require('../models/ubicaciones');
+const grilla = require('../models/grilla');
+// Las validaciones del alta de un plan de comedor son las MISMAS que las de
+// POST /api/grilla/planes: viven en un módulo aparte para no tener dos copias
+// (fase 12).
+const grillaCompartido = require('./grillaCompartido');
 const { ALERT_DAYS } = require('../config');
 
 const router = express.Router();
@@ -235,20 +240,85 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // POST /api/clientes — crear cliente nuevo (admin y operador; visor no puede)
+//
+// Con el bloque opcional `grilla` { plato_base_id, fecha_alta, observacion } el
+// cliente queda además en la grilla de comedor de su empresa (fase 12): es el
+// caso de ATC cargando un colaborador de UENO, que antes había que dar de alta
+// dos veces, acá y en la grilla.
 router.post('/', requireEscritura, async (req, res, next) => {
   try {
-    const { data, errores } = validarCliente(req.body || {});
+    const body = req.body || {};
+    const { data, errores } = validarCliente(body);
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
+
+    const pedidoDeGrilla = body.grilla && typeof body.grilla === 'object' ? body.grilla : null;
+
+    // req.user.gestiona_grilla lo lee requireAuth de la BASE en cada request
+    // (no del token), así que es el permiso vigente: sacárselo a alguien aplica
+    // en el acto, igual que en routes/grilla.js.
+    if (pedidoDeGrilla && !req.user.gestiona_grilla) {
+      return res.status(403).json({ error: 'La grilla solo la edita quien tiene el permiso de gestión' });
+    }
+
+    // Todo lo del plan se valida ANTES de insertar nada: un alta de comedor
+    // rechazada no tiene que dejar un cliente a medio crear.
+    let emp = null;
+    let datosPlan = null;
+    if (pedidoDeGrilla) {
+      if (data.segmento !== 'empresa') {
+        return res.status(400).json({ error: 'Solo un cliente de segmento Corporativo puede figurar en la grilla' });
+      }
+
+      // La búsqueda es por nombre exacto: si entrara una variante de
+      // mayúsculas, el plan quedaría creado y la persona no aparecería en
+      // ninguna grilla (cargarSemana filtra por clientes.empresa). El form
+      // normaliza el nombre antes de mandarlo.
+      const resEmp = await grillaCompartido.resolverEmpresaGrilla(data.empresa, { paraEditar: true });
+      if (resEmp.error) return res.status(resEmp.status).json({ error: resEmp.error });
+      emp = resEmp.emp;
+
+      const resPlan = await grillaCompartido.validarDatosPlan(pedidoDeGrilla);
+      if (resPlan.error) return res.status(400).json({ error: resPlan.error });
+      datosPlan = resPlan.datos;
+    }
 
     if (await clientes.existsCedula(data.cedula)) {
       return res.status(409).json({ error: 'Ya existe un cliente con esa cédula' });
     }
 
-    const cliente = await clientes.create(data);
-    const ubicacionesCliente = parseUbicaciones(req.body || {});
-    if (ubicacionesCliente.length) await ubicaciones.replaceForCliente(cliente.id, ubicacionesCliente);
+    const ubicacionesCliente = parseUbicaciones(body);
+
+    // Sin bloque de comedor, el alta es la de siempre.
+    if (!datosPlan) {
+      const cliente = await clientes.create(data);
+      if (ubicacionesCliente.length) await ubicaciones.replaceForCliente(cliente.id, ubicacionesCliente);
+      cliente.ubicaciones = await ubicaciones.listByCliente(cliente.id);
+      return res.status(201).json({ cliente });
+    }
+
+    // Con bloque de comedor: cliente, ubicaciones y plan en UNA transacción.
+    // Si el plan falla, el cliente no se crea — media alta sería peor que
+    // ninguna, porque nadie se entera de que falta la mitad.
+    //
+    // Las comprobaciones que hace el alta desde la grilla (que el colaborador
+    // sea de la empresa, que no sea la cuenta-empresa, que no tenga ya un plan
+    // vigente) acá se cumplen por construcción: el cliente se acaba de crear
+    // con esta empresa y no tiene ningún plan.
+    const { cliente, plan } = await grilla.enTransaccion(async (client) => {
+      const creado = await clientes.create(data, client);
+      if (ubicacionesCliente.length) await ubicaciones.replaceForCliente(creado.id, ubicacionesCliente, client);
+      const planCreado = await grilla.insertarPlan(client, creado.id, datosPlan, req.user);
+      return { cliente: creado, plan: planCreado };
+    });
+
     cliente.ubicaciones = await ubicaciones.listByCliente(cliente.id);
-    res.status(201).json({ cliente });
+
+    // Después del COMMIT: si la semana ya se le había enviado a cocina, se
+    // reenvía con el colaborador nuevo adentro. Nunca lanza, así que un
+    // reenvío fallido no voltea un alta que ya está guardada.
+    const envios = await grillaCompartido.reenviarPlan(emp.empresa, req.user);
+
+    res.status(201).json({ cliente, plan, envios });
   } catch (err) { next(err); }
 });
 

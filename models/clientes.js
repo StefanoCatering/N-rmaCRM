@@ -58,8 +58,11 @@ async function list({ estado, segmento, canal_origen, empresa, q } = {}) {
   return (await pool.query(sql, params)).rows;
 }
 
-async function getById(id) {
-  const result = await pool.query(`${SELECT_BASE} WHERE c.id = $1`, [id]);
+// ejecutor: por defecto el pool. El alta de cliente con plan de comedor
+// (fase 12) le pasa el client de su transacción, para poder leer el cliente
+// que acaba de insertar y que todavía no está commiteado.
+async function getById(id, ejecutor = pool) {
+  const result = await ejecutor.query(`${SELECT_BASE} WHERE c.id = $1`, [id]);
   return result.rows[0] || null;
 }
 
@@ -72,8 +75,9 @@ async function existsCedula(cedula, excludeId = null) {
   return r.rows.length > 0;
 }
 
-async function create(data) {
-  const result = await pool.query(`
+// ejecutor: ver getById. Sin él se comporta igual que siempre.
+async function create(data, ejecutor = pool) {
+  const result = await ejecutor.query(`
     INSERT INTO clientes
       (nombre_completo, cedula, email, telefono, telefono2, telefono3, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso, observaciones, tipo_envase)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -94,7 +98,7 @@ async function create(data) {
     data.observaciones || null,
     data.tipo_envase || 'Venezia',
   ]);
-  return getById(result.rows[0].id);
+  return getById(result.rows[0].id, ejecutor);
 }
 
 async function update(id, data) {
