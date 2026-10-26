@@ -52,13 +52,6 @@
         <div id="tabla-cont"><div class="empty-state">Cargando...</div></div>
       </div>
 
-      <!-- Pedido general -->
-      <div class="card">
-        <div class="card-title">pedido general</div>
-        <div class="nota">Lo que se pide por cantidad y no por colaborador: sopa, jugo y ensalada mixta, pero también sándwiches, wraps o ensaladas. Cualquier plato del catálogo, con su total por día.</div>
-        <div id="tabla-general"></div>
-      </div>
-
       <!-- Totales -->
       <div class="card">
         <div class="card-title">totales que van a cocina</div>
@@ -402,7 +395,6 @@
 
       renderAvisoProxima();
       renderTabla();
-      renderGeneral();
       renderTotales();
       renderEnvio();
     }
@@ -523,77 +515,6 @@
       const nota = dia.comentario ? `<span class="grilla-celda-nota">${escapeHtml(dia.comentario)}</span>` : '';
       return `<button type="button" class="grilla-celda ${clase}${puedeTocar ? '' : ' grilla-celda-bloqueada'}"
           data-cliente="${col.cliente_id}" data-fecha="${fecha}"${puedeTocar ? '' : ' disabled'}>${escapeHtml(texto)}${nota}</button>`;
-    }
-
-    // ── Pedido general ───────────────────────────────────────────
-
-    function renderGeneral() {
-      const cont = document.getElementById('tabla-general');
-      const dias = DATOS.dias;
-
-      if (!DATOS.catalogo_general.length) {
-        cont.innerHTML = '<div class="empty-state">No hay platos activos en el catálogo (tabla platos).</div>';
-        return;
-      }
-
-      const porPlato = new Map(DATOS.general.map(g => [g.plato_id, g]));
-
-      // El catálogo viene agrupado por categoría: una fila de encabezado por
-      // grupo y abajo sus platos. Son todos los platos activos, así que sin el
-      // encabezado la lista no se podría recorrer.
-      const filas = DATOS.catalogo_general.map(grupo => {
-        const encabezado = `<tr class="grilla-grupo"><td class="grilla-col-nombre" colspan="${dias.length + 2}">${escapeHtml(grupo.categoria)}</td></tr>`;
-
-        const items = grupo.platos.map(item => {
-          const fila = porPlato.get(item.id);
-          const celdas = dias.map(fecha => {
-            const sinServicio = Object.prototype.hasOwnProperty.call(DATOS.dias_sin_servicio, fecha);
-            const valor = fila && fila.cantidades[fecha] !== undefined ? fila.cantidades[fecha] : '';
-            const puedeTocar = editable(fecha) && !sinServicio;
-            return `<td class="${sinServicio ? 'grilla-td-sin-servicio' : ''}">
-              <input type="number" min="0" step="1" class="grilla-input-cant g-cant"
-                data-plato="${item.id}" data-fecha="${fecha}" value="${valor}"
-                placeholder="0"${puedeTocar ? '' : ' disabled'}/>
-            </td>`;
-          }).join('');
-          return `<tr><td class="grilla-col-nombre"><div class="grilla-nombre">${escapeHtml(item.etiqueta)}</div></td>${celdas}<td class="grilla-col-acc"></td></tr>`;
-        }).join('');
-
-        return encabezado + items;
-      }).join('');
-
-      cont.innerHTML = `
-        <div class="table-wrap">
-          <table class="grilla-tabla">
-            <thead><tr><th class="grilla-col-nombre">Ítem</th>${dias.map(f => `<th class="grilla-col-dia grilla-dia-head"><div class="grilla-dia-nombre">${etiquetaDia(f)}</div></th>`).join('')}<th class="grilla-col-acc"></th></tr></thead>
-            <tbody>${filas}</tbody>
-          </table>
-        </div>`;
-
-      cont.querySelectorAll('.g-cant').forEach(input => {
-        input.addEventListener('change', () => guardarGeneral(input));
-      });
-    }
-
-    async function guardarGeneral(input) {
-      const cantidad = input.value === '' ? 0 : parseInt(input.value, 10);
-      if (!Number.isInteger(cantidad) || cantidad < 0) {
-        mostrarError('La cantidad del pedido general debe ser un número entero mayor o igual a 0.');
-        return;
-      }
-      limpiarError();
-      input.disabled = true;
-      try {
-        const r = await api('/api/grilla/general', {
-          method: 'PUT',
-          body: { empresa: DATOS.empresa, fecha: input.dataset.fecha, plato_id: Number(input.dataset.plato), cantidad },
-        });
-        avisarEnvios(r.envios);
-        await cargar();
-      } catch (e) {
-        mostrarError(e.message);
-        input.disabled = false;
-      }
     }
 
     // ── Totales ──────────────────────────────────────────────────
