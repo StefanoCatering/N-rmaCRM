@@ -37,6 +37,16 @@
             <button class="btn-secondary" id="btn-guardar-ubicacion">Guardar ubicación</button>
           </div>
         </div>
+
+        <!-- Facturar a (fase 13). Cambiarlo es una edición del pedido como
+             cualquier otra: pide motivo y queda en la auditoría. -->
+        <div class="form-group mt-12" id="grupo-facturacion">
+          <label class="form-label">Facturar a</label>
+          <div id="facturacion-destino"></div>
+          <div class="btn-row mt-8">
+            <button class="btn-secondary" id="btn-guardar-facturacion">Guardar facturación</button>
+          </div>
+        </div>
       </div>
 
       <!-- Líneas -->
@@ -83,6 +93,7 @@
   <script>
     const PEDIDO_ID = Number(window.location.pathname.split('/')[2]);
     let PEDIDO = null;
+    let CLIENTE = null;   // el cliente del pedido, con su facturación resuelta
     let CATALOGO_PLATOS = [];
     let accionPendiente = null; // callback que espera el motivo
 
@@ -100,6 +111,11 @@
       document.getElementById('modal-motivo-cerrar').addEventListener('click', cerrarModalMotivo);
       document.getElementById('modal-motivo-confirmar').addEventListener('click', confirmarMotivo);
       document.getElementById('btn-guardar-ubicacion').addEventListener('click', guardarUbicacion);
+      document.getElementById('btn-guardar-facturacion').addEventListener('click', guardarFacturacion);
+
+      // El control se monta UNA vez (engancha un listener en document) y
+      // después cada carga solo le pone los valores del pedido.
+      montarFacturacionDestino('facturacion-destino', { prefijo: 'fact-ped', conSegunCliente: true });
       document.getElementById('btn-agregar-linea').addEventListener('click', agregarLinea);
 
       await cargar();
@@ -143,6 +159,7 @@
       document.getElementById('titulo').textContent = 'pedido #' + PEDIDO.id;
       renderInfo();
       await cargarUbicaciones();
+      aplicarFacturacion();
       renderLineas();
       renderNuevaLinea();
       await cargarAuditoria();
@@ -153,6 +170,10 @@
       const bloqueado = PEDIDO.cancelado || esDeGrilla() || CURRENT_USER.rol === 'visor';
       document.getElementById('card-agregar').classList.toggle('hidden', bloqueado);
       document.getElementById('btn-guardar-ubicacion').disabled = bloqueado;
+      document.getElementById('btn-guardar-facturacion').disabled = bloqueado;
+      // En un pedido de la grilla no se muestra facturación: su facturación no
+      // pasa por el CRM (nace con monto 0) y el backend no la resuelve.
+      document.getElementById('grupo-facturacion').classList.toggle('hidden', esDeGrilla());
       // En un pedido de grilla la ubicación la define grilla_empresas: dejar el
       // selector a la vista (aunque esté deshabilitado) haría pensar que se
       // puede cambiar desde acá. Se oculta y la dirección se muestra como dato.
@@ -207,6 +228,11 @@
           <div class="cliente-info-value">${p.cancelado ? '<span class="badge badge-danger">Cancelado</span>' : badgeEstadoPago(p.estado_pago)}</div></div>
         <div class="cliente-info-item"><span class="form-label">Cargado por</span>
           <div class="cliente-info-value">${p.recibido_por_username ? escapeHtml(p.recibido_por_username) : '—'}</div></div>
+        ${p.facturacion ? `
+        <div class="cliente-info-item" style="grid-column:1/-1;"><span class="form-label">Factura a</span>
+          <div class="cliente-info-value">${fmtFacturacion(p.facturacion)}
+            <span class="text-muted">(${p.facturacion.segun_cliente ? 'según el cliente' : 'cambiado para este pedido'})</span>
+          </div></div>` : ''}
         ${esDeGrilla() ? `
         <div class="cliente-info-item"><span class="form-label">Ubicación de entrega</span>
           <div class="cliente-info-value">${escapeHtml([p.ubicacion_direccion, p.ubicacion_zona].filter(Boolean).join(' · ') || 'Sin especificar')}</div></div>` : ''}
@@ -218,6 +244,9 @@
       let ubic = [];
       try {
         const { cliente } = await api('/api/clientes/' + PEDIDO.cliente_id);
+        // Se guarda entero: su facturación resuelta es lo que hay que mostrar
+        // debajo de "Según el cliente" (fase 13).
+        CLIENTE = cliente;
         ubic = cliente.ubicaciones || [];
       } catch (e) { /* sin ubicaciones, el select queda solo con "sin especificar" */ }
 
@@ -665,6 +694,47 @@
       pedirMotivo('cambiar ubicación', async (motivo) => {
         const r = await api('/api/pedidos/' + PEDIDO_ID, {
           method: 'PATCH', body: { ubicacion_id: valor === '' ? null : Number(valor), motivo },
+        });
+        avisarSync(r.sync);
+        await cargar();
+      });
+    }
+
+    // ── Facturar a ───────────────────────────────────────────────
+
+    // Deja el control mostrando lo que tiene el pedido, y debajo —para el caso
+    // normal, "según el cliente"— a quién iría la factura con lo que el
+    // cliente tiene configurado hoy.
+    function aplicarFacturacion() {
+      if (esDeGrilla()) return;
+
+      setFacturacionExcluido('facturacion-destino', PEDIDO.cliente_id);
+      setFacturacionDestino('fact-ped', {
+        factura_a: PEDIDO.factura_a,
+        factura_cliente_id: PEDIDO.factura_cliente_id,
+        factura_razon_social: PEDIDO.factura_razon_social,
+        factura_ruc: PEDIDO.factura_ruc,
+        factura_email: PEDIDO.factura_email,
+        // Si el override es a otro cliente, el nombre y el RUC ya vienen
+        // resueltos en PEDIDO.facturacion.
+        cliente_nombre: PEDIDO.facturacion ? PEDIDO.facturacion.cliente_nombre : null,
+        cliente_ruc: PEDIDO.facturacion ? PEDIDO.facturacion.ruc : null,
+      });
+
+      const f = CLIENTE && CLIENTE.facturacion;
+      setFacturacionResumen('fact-ped', f ? 'Según el cliente, hoy se le factura a ' + fmtFacturacion(f) + '.' : '');
+    }
+
+    function guardarFacturacion() {
+      const destino = leerFacturacionDestino('fact-ped');
+      if (destino.error) { mostrarError(destino.error); return; }
+      limpiarError();
+
+      pedirMotivo('cambiar facturación', async (motivo) => {
+        // factura_a = null vuelve el pedido a "según el cliente". El backend no
+        // re-sincroniza con cocina por un cambio que solo toca la facturación.
+        const r = await api('/api/pedidos/' + PEDIDO_ID, {
+          method: 'PATCH', body: { ...destino.datos, motivo },
         });
         avisarSync(r.sync);
         await cargar();

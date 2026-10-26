@@ -85,6 +85,15 @@
           <div class="nota mt-8">Requerido cuando el estado de pago es "Pago parcial".</div>
         </div>
 
+        <!-- Facturar a (fase 13). Por defecto "según el cliente": no se copia
+             nada al pedido, así que si mañana se carga el RUC del marido este
+             pedido sale con el RUC nuevo. Solo se cambia cuando ESTE pedido
+             va a otro nombre. -->
+        <div class="form-group">
+          <label class="form-label">Facturar a</label>
+          <div id="facturacion-destino"></div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Notas del pedido</label>
           <textarea id="f-descripcion" placeholder="Ej: paga con POS, dejar en portería"></textarea>
@@ -162,6 +171,14 @@
       }
       document.getElementById('btn-agregar-linea').addEventListener('click', () => agregarLinea());
       agregarLinea();
+
+      // Mismo control que el form de cliente (ver common.js), con la opción
+      // extra "Según el cliente", que es lo normal.
+      montarFacturacionDestino('facturacion-destino', {
+        prefijo: 'fact-ped',
+        conSegunCliente: true,
+      });
+      actualizarResumenFacturacion();
 
       document.getElementById('f-estado-pago').addEventListener('change', toggleMontoAbonado);
       toggleMontoAbonado();
@@ -377,6 +394,28 @@
       marcarEstadoCliente(cliente);
       actualizarOpcionCortesia();
       actualizarEtiquetasEnvase();
+      actualizarResumenFacturacion();
+    }
+
+    // Debajo de "Según el cliente", a quién iría la factura con lo que el
+    // cliente tiene configurado hoy: sin eso, "según el cliente" no dice nada
+    // y quien carga el pedido no sabe qué va a salir si no toca nada.
+    //
+    // El cliente del pedido tampoco puede elegirse como "otro cliente": para
+    // facturarle a él está "Mismo cliente del pedido".
+    function actualizarResumenFacturacion() {
+      setFacturacionExcluido('facturacion-destino', clienteSeleccionado ? clienteSeleccionado.id : null);
+
+      if (!clienteSeleccionado) {
+        setFacturacionResumen('fact-ped', 'Elegí el cliente para ver a quién se le factura.');
+        return;
+      }
+      const f = clienteSeleccionado.facturacion;
+      if (!f) {
+        setFacturacionResumen('fact-ped', '');
+        return;
+      }
+      setFacturacionResumen('fact-ped', 'Hoy se le factura a ' + fmtFacturacion(f) + '.');
     }
 
     // Avisa y bloquea el guardado cuando el cliente elegido no está activo, en
@@ -437,6 +476,14 @@
         ubicacion_id: document.getElementById('f-ubicacion').value || null,
         lineas: recolectarLineas(),
       };
+
+      const destino = leerFacturacionDestino('fact-ped');
+      if (destino.error) {
+        errorBox.textContent = destino.error;
+        errorBox.classList.remove('hidden');
+        return;
+      }
+      Object.assign(payload, destino.datos);
 
       const btn = document.getElementById('btn-guardar');
       btn.disabled = true;

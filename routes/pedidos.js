@@ -5,6 +5,7 @@ const detalle = require('../models/pedidoDetalle');
 const platos = require('../models/platos');
 const ubicaciones = require('../models/ubicaciones');
 const syncPedidos = require('../models/syncPedidos');
+const facturacion = require('../models/facturacion');
 
 const router = express.Router();
 
@@ -244,6 +245,13 @@ router.post('/', requireEscritura, async (req, res, next) => {
     const { lineas, errores: erroresLineas } = await parsearLineas(body);
     errores.push(...erroresLineas);
 
+    // Facturación de ESTE pedido (fase 13). Opcional: si no viene, el pedido
+    // queda en "según el cliente" (factura_a NULL) y se resuelve al leerlo.
+    // idExcluido es el cliente del pedido: facturarle a él se pide con
+    // 'mismo', no eligiéndolo como "otro cliente".
+    const fact = await facturacion.validarDestino(body, { enPedido: true, idExcluido: cliente_id });
+    errores.push(...fact.errores);
+
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
     // Normalizar monto_pagado según estado de pago:
@@ -266,6 +274,7 @@ router.post('/', requireEscritura, async (req, res, next) => {
       detalle_modificacion,
       ubicacion_id,
       lineas,
+      ...fact.datos,
       // Quién lo cargó: el id queda en pedidos.recibido_por y el username en
       // la fila 'creacion' de pedidos_auditoria, las dos en la misma
       // transacción que el pedido (fase 8).
@@ -277,7 +286,7 @@ router.post('/', requireEscritura, async (req, res, next) => {
     // queda registrado en sync_errores y la respuesta lo informa, pero el
     // pedido NO se deshace (requisito 9.c).
     const sync = await syncPedidos.sincronizarSinFallar(pedido.id);
-    res.status(201).json({ pedido, sync });
+    res.status(201).json({ pedido, sync, aviso: fact.aviso });
   } catch (err) { next(err); }
 });
 
@@ -352,14 +361,18 @@ router.patch('/:id', requireEscritura, async (req, res, next) => {
     const motivo = String(body.motivo || '').trim();
     if (!motivo) return res.status(400).json({ error: 'El motivo es requerido' });
 
-    const CAMPOS_EDITABLES = ['monto', 'fecha_pedido', 'tipo_vianda', 'ubicacion_id'];
+    // factura_a es el campo que abre el grupo de facturación: cuando viene
+    // —incluso en null, que es "según el cliente"— se reescriben las cinco
+    // columnas juntas, porque son un solo dato y no cinco independientes.
+    const CAMPOS_EDITABLES = ['monto', 'fecha_pedido', 'tipo_vianda', 'ubicacion_id', 'factura_a'];
     const provistos = CAMPOS_EDITABLES.filter(campo => body[campo] !== undefined);
     if (!provistos.length) {
-      return res.status(400).json({ error: 'Debe indicar al menos un campo a modificar (monto, fecha_pedido, tipo_vianda o ubicacion_id)' });
+      return res.status(400).json({ error: 'Debe indicar al menos un campo a modificar (monto, fecha_pedido, tipo_vianda, ubicacion_id o factura_a)' });
     }
 
     const cambios = {};
     const errores = [];
+    let avisoFacturacion = null;
 
     if (provistos.includes('monto')) {
       const monto = Number(body.monto);
@@ -392,12 +405,29 @@ router.patch('/:id', requireEscritura, async (req, res, next) => {
       }
     }
 
+    if (provistos.includes('factura_a')) {
+      // Mismas reglas que el alta de pedido y que el cliente: viven en
+      // models/facturacion.js. Mandar factura_a = null vuelve el pedido a
+      // "según el cliente".
+      const fact = await facturacion.validarDestino(body, { enPedido: true, idExcluido: pedido.cliente_id });
+      errores.push(...fact.errores);
+      Object.assign(cambios, fact.datos);
+      avisoFacturacion = fact.aviso;
+    }
+
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
     const actualizado = await pedidos.update(id, pedido, cambios, req.user.username, motivo);
-    // ubicacion_id cambia la dirección que ve producción, así que se re-espeja.
-    const sync = await syncPedidos.sincronizarSinFallar(id);
-    res.json({ pedido: actualizado, sync });
+
+    // A nombre de quién se factura no llega a producción: cocina no ve el RUC
+    // (ver el contrato de pedidos_crm_detalle en models/syncPedidos.js). Si la
+    // edición fue SOLO de facturación, re-espejar el pedido entero sería
+    // tráfico y ruido en los logs por un cambio que del otro lado no se ve.
+    // ubicacion_id, en cambio, cambia la dirección que lee producción.
+    const soloFacturacion = provistos.every(campo => campo === 'factura_a');
+    const sync = soloFacturacion ? null : await syncPedidos.sincronizarSinFallar(id);
+
+    res.json({ pedido: actualizado, sync, aviso: avisoFacturacion });
   } catch (err) { next(err); }
 });
 

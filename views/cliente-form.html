@@ -196,6 +196,41 @@
           <button type="button" class="btn-secondary" id="btn-agregar-ubicacion">+ Agregar ubicación</button>
         </div>
 
+        <!-- Facturación (fase 13). Dos cosas distintas y por eso dos bloques:
+             los datos del cliente son SUYOS, y "sus pedidos se facturan a" es
+             a quién va la factura. Separarlos es lo que evita las cadenas:
+             cuando se factura a otro cliente se usan los datos propios de esa
+             persona, no su propia configuración. -->
+        <div class="card mt-12" style="padding:12px;">
+          <div class="card-title">facturación</div>
+
+          <div class="nota">Desde el CRM no se emite ninguna factura: esto queda registrado para quien la emite.</div>
+
+          <div class="form-group mt-12">
+            <label class="form-label">Datos de facturación de este cliente</label>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Razón social</label>
+                <input type="text" id="f-razon-social" placeholder="Ej: Lucía Benítez"/>
+              </div>
+              <div class="form-group">
+                <label class="form-label">RUC</label>
+                <input type="text" id="f-ruc" maxlength="20" placeholder="Ej: 4123456-7"/>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email para la factura</label>
+              <input type="email" id="f-email-facturacion" placeholder="facturacion@ejemplo.com"/>
+            </div>
+            <div class="nota">Se pueden dejar vacíos y cargarlos cuando se tenga el dato.</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Sus pedidos se facturan a</label>
+            <div id="facturacion-destino"></div>
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Observaciones</label>
           <textarea id="f-observaciones" maxlength="500" rows="3" placeholder="Ej: alérgico a frutos secos, prefiere sin sal..."></textarea>
@@ -277,6 +312,14 @@
       document.getElementById('f-empresa').addEventListener('input', actualizarComedor);
       document.getElementById('f-grilla-figura').addEventListener('change', alTildarGrilla);
       await cargarComedor();
+
+      // El control de "a quién se factura" lo comparte con el form de pedido
+      // (ver common.js). excluirId solo existe en la edición: al crear
+      // todavía no hay id que excluir.
+      montarFacturacionDestino('facturacion-destino', {
+        prefijo: 'fact-cli',
+        excluirId: esEdicion ? Number(clienteIdEditar) : null,
+      });
 
       document.getElementById('btn-agregar-ubicacion').addEventListener('click', mostrarSiguienteUbicacion);
       document.getElementById('btn-agregar-telefono').addEventListener('click', mostrarSiguienteTelefono);
@@ -393,6 +436,22 @@
         document.getElementById('f-fecha-ingreso').value = cliente.fecha_ingreso ? String(cliente.fecha_ingreso).slice(0, 10) : '';
         document.getElementById('f-observaciones').value = cliente.observaciones || '';
 
+        document.getElementById('f-razon-social').value = cliente.razon_social || '';
+        document.getElementById('f-ruc').value = cliente.ruc || '';
+        document.getElementById('f-email-facturacion').value = cliente.email_facturacion || '';
+        // cliente.facturacion viene ya resuelto por el backend: cuando factura
+        // a otro cliente trae su nombre y su RUC, así el control lo puede
+        // mostrar sin volver a buscarlo.
+        setFacturacionDestino('fact-cli', {
+          factura_a: cliente.factura_a,
+          factura_cliente_id: cliente.factura_cliente_id,
+          factura_razon_social: cliente.factura_razon_social,
+          factura_ruc: cliente.factura_ruc,
+          factura_email: cliente.factura_email,
+          cliente_nombre: cliente.facturacion ? cliente.facturacion.cliente_nombre : null,
+          cliente_ruc: cliente.facturacion ? cliente.facturacion.ruc : null,
+        });
+
         document.getElementById('grupo-empresa').classList.toggle('hidden', cliente.segmento !== 'empresa');
         document.getElementById('grupo-embajador').classList.toggle('hidden', cliente.canal_origen !== 'embajador');
 
@@ -442,7 +501,18 @@
         fecha_ingreso: document.getElementById('f-fecha-ingreso').value,
         observaciones: document.getElementById('f-observaciones').value.trim(),
         ubicaciones: recolectarUbicaciones(),
+        razon_social: document.getElementById('f-razon-social').value.trim(),
+        ruc: document.getElementById('f-ruc').value.trim(),
+        email_facturacion: document.getElementById('f-email-facturacion').value.trim(),
       };
+
+      const destino = leerFacturacionDestino('fact-cli');
+      if (destino.error) {
+        errorBox.textContent = destino.error;
+        errorBox.classList.remove('hidden');
+        return;
+      }
+      Object.assign(payload, destino.datos);
 
       // Alta en la grilla junto con el cliente. El nombre exacto de la empresa
       // se vuelve a pisar acá por si lo editaron después de tildar: el backend

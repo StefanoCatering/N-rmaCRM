@@ -4,6 +4,7 @@ const pedidos = require('../models/pedidos');
 const detalle = require('../models/pedidoDetalle');
 const ubicaciones = require('../models/ubicaciones');
 const grilla = require('../models/grilla');
+const facturacion = require('../models/facturacion');
 // Las validaciones del alta de un plan de comedor son las MISMAS que las de
 // POST /api/grilla/planes: viven en un módulo aparte para no tener dos copias
 // (fase 12).
@@ -126,6 +127,29 @@ function validarCliente(body, { partial = false } = {}) {
   return { data, errores };
 }
 
+// Facturación (fase 13): los datos propios del cliente y a quién se le
+// facturan sus pedidos. Las reglas están en models/facturacion.js y las
+// comparten el alta y la edición de cliente y las de pedido; acá solo se
+// juntan los dos pedazos y se vuelcan sobre `data`.
+//
+// idExcluido: el id del propio cliente cuando se está editando, para que no
+// pueda elegirse a sí mismo como "otro cliente" (al crear todavía no hay id,
+// y por eso mismo el caso no existe).
+//
+// Devuelve el aviso de facturacion.validarDestino, que no es un error: el
+// cliente elegido puede no tener RUC todavía y el alta igual tiene que pasar.
+async function aplicarFacturacion(body, data, errores, { idExcluido = null } = {}) {
+  const propios = facturacion.normalizarPropios(body);
+  Object.assign(data, propios.datos);
+  errores.push(...propios.errores);
+
+  const destino = await facturacion.validarDestino(body, { idExcluido });
+  Object.assign(data, destino.datos);
+  errores.push(...destino.errores);
+
+  return destino.aviso;
+}
+
 // Hasta 3 ubicaciones de entrega; descarta las que vienen completamente vacías.
 function parseUbicaciones(body) {
   const raw = Array.isArray(body.ubicaciones) ? body.ubicaciones : [];
@@ -225,16 +249,26 @@ router.get('/kpis', requireAdminOrVisor, async (req, res, next) => {
 });
 
 // GET /api/clientes/:id — ficha + historial de pedidos
+//
+// Además de las columnas de facturación tal cual están en la base, la
+// respuesta trae la facturación ya RESUELTA (a quién se le factura y con qué
+// RUC, siguiendo el factura_a del cliente) y la lista de quienes facturan a
+// nombre de este: dos cosas que la ficha mostraría mal si las calculara sola
+// (fase 13).
 router.get('/:id', async (req, res, next) => {
   try {
     const cliente = await clientes.getById(req.params.id);
     if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
-    const [colaboradores, historialPedidos, ubicacionesCliente] = await Promise.all([
+    const [colaboradores, historialPedidos, ubicacionesCliente, resuelta, facturanAEste] = await Promise.all([
       cliente.empresa ? clientes.listColaboradores(cliente.empresa, cliente.id) : Promise.resolve([]),
       pedidos.listByCliente(cliente.id),
       ubicaciones.listByCliente(cliente.id),
+      facturacion.resolverCliente(cliente),
+      clientes.listFacturanA(cliente.id),
     ]);
     cliente.ubicaciones = ubicacionesCliente;
+    cliente.facturacion = resuelta;
+    cliente.facturan_a_este = facturanAEste;
     res.json({ cliente, pedidos: historialPedidos, colaboradores });
   } catch (err) { next(err); }
 });
@@ -249,6 +283,9 @@ router.post('/', requireEscritura, async (req, res, next) => {
   try {
     const body = req.body || {};
     const { data, errores } = validarCliente(body);
+    // Al crear no hay id todavía, así que no hay forma de que se elija a sí
+    // mismo como "otro cliente".
+    const avisoFacturacion = await aplicarFacturacion(body, data, errores);
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
     const pedidoDeGrilla = body.grilla && typeof body.grilla === 'object' ? body.grilla : null;
@@ -293,7 +330,8 @@ router.post('/', requireEscritura, async (req, res, next) => {
       const cliente = await clientes.create(data);
       if (ubicacionesCliente.length) await ubicaciones.replaceForCliente(cliente.id, ubicacionesCliente);
       cliente.ubicaciones = await ubicaciones.listByCliente(cliente.id);
-      return res.status(201).json({ cliente });
+      cliente.facturacion = await facturacion.resolverCliente(cliente);
+      return res.status(201).json({ cliente, aviso: avisoFacturacion });
     }
 
     // Con bloque de comedor: cliente, ubicaciones y plan en UNA transacción.
@@ -312,13 +350,14 @@ router.post('/', requireEscritura, async (req, res, next) => {
     });
 
     cliente.ubicaciones = await ubicaciones.listByCliente(cliente.id);
+    cliente.facturacion = await facturacion.resolverCliente(cliente);
 
     // Después del COMMIT: si la semana ya se le había enviado a cocina, se
     // reenvía con el colaborador nuevo adentro. Nunca lanza, así que un
     // reenvío fallido no voltea un alta que ya está guardada.
     const envios = await grillaCompartido.reenviarPlan(emp.empresa, req.user);
 
-    res.status(201).json({ cliente, plan, envios });
+    res.status(201).json({ cliente, plan, envios, aviso: avisoFacturacion });
   } catch (err) { next(err); }
 });
 
@@ -328,7 +367,9 @@ router.put('/:id', requireEscritura, async (req, res, next) => {
     const cliente = await clientes.getById(req.params.id);
     if (!cliente) return res.status(404).json({ error: 'Cliente no encontrado' });
 
-    const { data, errores } = validarCliente(req.body || {});
+    const body = req.body || {};
+    const { data, errores } = validarCliente(body);
+    const avisoFacturacion = await aplicarFacturacion(body, data, errores, { idExcluido: cliente.id });
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
     if (await clientes.existsCedula(data.cedula, cliente.id)) {
@@ -336,9 +377,10 @@ router.put('/:id', requireEscritura, async (req, res, next) => {
     }
 
     const actualizado = await clientes.update(cliente.id, data);
-    await ubicaciones.replaceForCliente(cliente.id, parseUbicaciones(req.body || {}));
+    await ubicaciones.replaceForCliente(cliente.id, parseUbicaciones(body));
     actualizado.ubicaciones = await ubicaciones.listByCliente(cliente.id);
-    res.json({ cliente: actualizado });
+    actualizado.facturacion = await facturacion.resolverCliente(actualizado);
+    res.json({ cliente: actualizado, aviso: avisoFacturacion });
   } catch (err) { next(err); }
 });
 

@@ -373,6 +373,42 @@
         </div>
 
         <div class="card">
+          <div class="card-title">facturación</div>
+          <div class="cliente-info-grid">
+            <div class="cliente-info-item"><span class="form-label">Razón social</span>
+              <div class="cliente-info-value">${c.razon_social ? escapeHtml(c.razon_social) : '<span class="text-muted">—</span>'}</div></div>
+            <div class="cliente-info-item"><span class="form-label">RUC</span>
+              <div class="cliente-info-value">${c.ruc ? escapeHtml(c.ruc) : '<span class="text-muted">sin RUC cargado</span>'}</div></div>
+            <div class="cliente-info-item"><span class="form-label">Email para la factura</span>
+              <div class="cliente-info-value">${c.email_facturacion ? escapeHtml(c.email_facturacion) : '<span class="text-muted">—</span>'}</div></div>
+            <!-- La facturación RESUELTA: a quién va la factura de sus pedidos y
+                 con qué RUC. La calcula el backend (models/facturacion.js), así
+                 que acá no se repite la regla. -->
+            <div class="cliente-info-item" style="grid-column:1/-1;">
+              <span class="form-label">Factura a</span>
+              <div class="cliente-info-value">
+                ${fmtFacturacion(c.facturacion)}
+                ${c.facturacion && c.facturacion.modo === 'mismo' ? ' <span class="text-muted">(a su propio nombre)</span>' : ''}
+                ${c.facturacion && c.facturacion.modo === 'otro_cliente' && c.facturacion.cliente_id
+                  ? ` · <a href="/clientes/${c.facturacion.cliente_id}">ver su ficha →</a>`
+                  : ''}
+                ${c.facturacion && c.facturacion.modo === 'otros' ? ' <span class="text-muted">(datos cargados a mano)</span>' : ''}
+              </div>
+            </div>
+            ${(c.facturan_a_este && c.facturan_a_este.length) ? `
+            <!-- Al revés: quiénes le facturan a esta persona. Es el dato que
+                 necesita el marido que recibe la factura y pregunta por qué le
+                 llegó. -->
+            <div class="cliente-info-item" style="grid-column:1/-1;">
+              <span class="form-label">Facturan a nombre de este cliente</span>
+              <div class="cliente-info-value">
+                ${c.facturan_a_este.map(f => `<a href="/clientes/${f.id}">${escapeHtml(f.nombre_completo)}</a>`).join(' · ')}
+              </div>
+            </div>` : ''}
+          </div>
+        </div>
+
+        <div class="card">
           <div class="card-title">historial de estado</div>
           ${auditoria === null
             ? '<div class="empty-state">No se pudo cargar el historial de estado.</div>'
