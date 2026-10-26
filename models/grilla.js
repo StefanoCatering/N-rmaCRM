@@ -840,31 +840,42 @@ async function setGeneral(empresa, fecha, platoId, cantidad, usuario) {
 // Es un upsert sobre la PK cliente_id: reincorporar a alguien que se había
 // dado de baja reusa su fila (y le limpia la fecha_baja) en lugar de fallar.
 // Que no haya un plan VIGENTE lo valida la ruta antes de llegar acá.
-async function crearPlanes(clienteIds, { plato_base_id, observacion, fecha_alta }, usuario) {
+async function crearPlanes(clienteIds, datos, usuario) {
   return enTransaccion(async (client) => {
     const creados = [];
     for (const clienteId of clienteIds) {
-      const antes = (await client.query(
-        'SELECT * FROM grilla_planes WHERE cliente_id = $1', [clienteId]
-      )).rows[0] || null;
-
-      const plan = (await client.query(`
-        INSERT INTO grilla_planes (cliente_id, plato_base_id, observacion, fecha_alta, fecha_baja)
-        VALUES ($1, $2, $3, $4, NULL)
-        ON CONFLICT (cliente_id) DO UPDATE SET
-          plato_base_id = EXCLUDED.plato_base_id,
-          observacion   = EXCLUDED.observacion,
-          fecha_alta    = EXCLUDED.fecha_alta,
-          fecha_baja    = NULL,
-          updated_at    = NOW()
-        RETURNING *
-      `, [clienteId, plato_base_id, observacion || null, fecha_alta])).rows[0];
-
-      await auditar(usuario && usuario.id, 'grilla_planes', `cliente=${clienteId}`, antes, plan, client);
-      creados.push(plan);
+      creados.push(await insertarPlan(client, clienteId, datos, usuario));
     }
     return creados;
   });
+}
+
+// El alta de UN plan con su auditoría, sobre una transacción ya abierta.
+//
+// Está separada de crearPlanes porque el alta de cliente con "Figura en la
+// grilla" (fase 12) crea el cliente y su plan en la MISMA transacción —si el
+// plan falla, el cliente no se crea—, y necesita meter este INSERT adentro de
+// la suya. Que el plan nuevo quede en grilla_auditoria igual que cualquier
+// alta de la grilla sale de usar este mismo código y no una copia.
+async function insertarPlan(client, clienteId, { plato_base_id, observacion, fecha_alta }, usuario) {
+  const antes = (await client.query(
+    'SELECT * FROM grilla_planes WHERE cliente_id = $1', [clienteId]
+  )).rows[0] || null;
+
+  const plan = (await client.query(`
+    INSERT INTO grilla_planes (cliente_id, plato_base_id, observacion, fecha_alta, fecha_baja)
+    VALUES ($1, $2, $3, $4, NULL)
+    ON CONFLICT (cliente_id) DO UPDATE SET
+      plato_base_id = EXCLUDED.plato_base_id,
+      observacion   = EXCLUDED.observacion,
+      fecha_alta    = EXCLUDED.fecha_alta,
+      fecha_baja    = NULL,
+      updated_at    = NOW()
+    RETURNING *
+  `, [clienteId, plato_base_id, observacion || null, fecha_alta])).rows[0];
+
+  await auditar(usuario && usuario.id, 'grilla_planes', `cliente=${clienteId}`, antes, plan, client);
+  return plan;
 }
 
 // Cambio de plato base, de observación, o baja con fecha.
@@ -910,5 +921,5 @@ module.exports = {
   conLockDeSemana, sincronizarConLock,
   upsertCelda, borrarCelda, upsertCeldasRango,
   setSinServicio, borrarSinServicio, setGeneral,
-  crearPlanes, actualizarPlan,
+  crearPlanes, insertarPlan, actualizarPlan,
 };

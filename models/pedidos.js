@@ -305,31 +305,64 @@ function fechasDeLineas(lineas = []) {
   return (desde || hasta) ? { desde, hasta } : undefined;
 }
 
-// Cantidad de pedidos de vianda (tipo_vianda IS NOT NULL) cuya fecha_pedido cae
-// dentro del rango [fecha_desde, fecha_hasta].
+// El pedido semanal del comedor no es un pedido recibido: lo arma sola la
+// grilla a partir de lo que ya está cargado, y contarlo le sumaría a la ATC un
+// pedido por empresa y por semana que nadie recepcionó (fase 12). Queda afuera
+// de los tres KPIs de abajo.
+//
+// IS DISTINCT FROM y no <>: origen es NULL en los pedidos cargados a mano, y
+// con <> esas filas darían NULL y se irían del conteo.
+const SQL_NO_ES_GRILLA = `p.origen IS DISTINCT FROM 'grilla'`;
+
+// ¿El pedido tiene al menos una línea viva? Es lo que separa un pedido nuevo
+// (fase 6 en adelante, que se cuenta por sus líneas) de uno viejo (los 765
+// anteriores, que solo tienen la cabecera y se cuentan como siempre).
+const SQL_TIENE_LINEAS = `
+  EXISTS (SELECT 1 FROM pedido_detalle d WHERE d.pedido_id = p.id AND d.cancelado = false)
+`;
+
+// Cantidad de pedidos recibidos cuya fecha_pedido cae dentro del rango
+// [fecha_desde, fecha_hasta].
+//
+// Un pedido cuenta si dice QUÉ se pidió: con tipo_vianda (los viejos) o con al
+// menos una línea viva (los nuevos). Desde la fase 12 el form de pedido ya no
+// carga tipo_vianda, así que sin la segunda mitad este KPI habría empezado a
+// dar 0 para todo lo cargado de ahora en adelante.
 // (ex countRecepcionadasEstaSemana — renombrada al dejar de estar atada a la semana corriente)
 async function countRecepcionadas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
-    SELECT COUNT(*)::integer AS n FROM pedidos
-    WHERE tipo_vianda IS NOT NULL
-      AND cancelado = false
-      AND fecha_pedido >= $1 AND fecha_pedido <= $2
+    SELECT COUNT(*)::integer AS n FROM pedidos p
+    WHERE p.cancelado = false
+      AND ${SQL_NO_ES_GRILLA}
+      AND p.fecha_pedido >= $1 AND p.fecha_pedido <= $2
+      AND (p.tipo_vianda IS NOT NULL OR ${SQL_TIENE_LINEAS})
   `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
 
-// Cantidad de pedidos cuya ventana de entrega [fecha_entrega_desde, fecha_entrega_hasta]
-// se solapa con el rango [fecha_desde, fecha_hasta]. Condición de solapamiento estándar:
+// Cantidad de pedidos cuya ventana de entrega EFECTIVA se solapa con el rango
+// [fecha_desde, fecha_hasta]. Condición de solapamiento estándar:
 // A.desde <= B.hasta AND A.hasta >= B.desde.
+//
+// "Efectiva" quiere decir las líneas vivas si el pedido tiene, y la cabecera si
+// no: desde la fase 6 la entrega vive en las líneas, y desde la fase 12 el form
+// ya no carga fecha_entrega_desde/hasta, así que mirar solo la cabecera dejaba
+// afuera todo lo cargado de ahora en adelante. Se reusan los pedazos de SQL de
+// la fase 11 (los mismos que usan el listado y el export) en lugar de volver a
+// escribir la regla; asumen los alias p y dl.
+//
+// Un pedido sin ninguna entrega conocida da NULL en las dos puntas y queda
+// afuera, igual que antes: no hay ninguna entrega suya dentro del rango.
 // (ex countEntregadasEstaSemana — renombrada al dejar de estar atada a la semana corriente)
 async function countEntregadas(fecha_desde, fecha_hasta) {
   const r = await pool.query(`
-    SELECT COUNT(*)::integer AS n FROM pedidos
-    WHERE fecha_entrega_desde IS NOT NULL
-      AND fecha_entrega_hasta IS NOT NULL
-      AND cancelado = false
-      AND fecha_entrega_desde <= $2
-      AND fecha_entrega_hasta >= $1
+    SELECT COUNT(*)::integer AS n
+    FROM pedidos p
+    LEFT JOIN (${SQL_FECHAS_LINEAS}) dl ON dl.pedido_id = p.id
+    WHERE p.cancelado = false
+      AND ${SQL_NO_ES_GRILLA}
+      AND ${SQL_ENTREGA_INICIO} <= $2
+      AND ${SQL_ENTREGA_FIN} >= $1
   `, [fecha_desde, fecha_hasta]);
   return r.rows[0].n;
 }
@@ -347,21 +380,72 @@ async function countCortesia(fecha_desde, fecha_hasta) {
   return r.rows[0].n;
 }
 
-// Cantidad de pedidos por semana (lunes ISO) y tipo_vianda, dentro del rango
-// [fecha_desde, fecha_hasta]. Deja afuera modificacion_menu y pedidos sin
-// vianda (tipo_vianda IS NULL). Devuelve una fila por semana con datos, con
-// los 3 conteos por tipo (0 si esa semana no tuvo pedidos de ese tipo).
+// Qué plato del catálogo cuenta como cuál de las tres barras del gráfico.
+// Se resuelve contra la tabla platos por (categoria, nombre) —la misma clave
+// que identifica un plato en todo el sistema, ver etiquetaPlato— y no con ids
+// fijos acá adentro: los ids salen de la base, así que un plato que se vuelve
+// a cargar con otro id sigue clasificando igual.
+//
+// Los platos que no están en esta lista (wraps, ensaladas, sándwiches, Pollo
+// Grille, los ítems generales) no entran en el gráfico: es el gráfico de las
+// tres viandas básicas, no el de todo lo que se vende.
+const SQL_PLATOS_POR_TIPO_VIANDA = `
+  SELECT pl.id, cl.tipo
+  FROM platos pl
+  JOIN (VALUES
+    ('Básicos', 'Estándar',           'economico'),
+    ('Básicos', 'Saludable',          'saludable'),
+    ('Básicos', 'Saludable especial', 'saludable'),
+    ('Básicos', 'Low carb',           'low_carb'),
+    ('Básicos', 'Low carb especial',  'low_carb')
+  ) AS cl(categoria, nombre, tipo)
+    ON cl.categoria = pl.categoria AND cl.nombre = pl.nombre
+`;
+
+// Viandas por semana (lunes ISO) y tipo, dentro del rango [fecha_desde, fecha_hasta].
+//
+// Dos fuentes, por la misma regla que el resto del dashboard (fase 12): un
+// pedido CON líneas vivas se cuenta por sus líneas, y uno SIN líneas —los 765
+// anteriores a la fase 6, que solo tienen tipo_vianda en la cabecera— se cuenta
+// como siempre. El NOT EXISTS de la primera mitad es lo que evita contar dos
+// veces un pedido que tenga las dos cosas.
+//
+// La unidad es 1 por línea, igual que antes era 1 por pedido: la cantidad de la
+// línea no multiplica. El pedido semanal del comedor queda afuera.
+//
+// Devuelve una fila por semana con datos, con los 3 conteos por tipo (0 si esa
+// semana no tuvo viandas de ese tipo).
 async function viandasPorTipoPorSemana(fecha_desde, fecha_hasta) {
   const rows = (await pool.query(`
-    SELECT
-      to_char(date_trunc('week', fecha_pedido), 'YYYY-MM-DD') AS semana,
-      tipo_vianda,
-      COUNT(*)::integer AS cantidad
-    FROM pedidos
-    WHERE tipo_vianda IN ('economico', 'saludable', 'low_carb')
-      AND cancelado = false
-      AND fecha_pedido >= $1 AND fecha_pedido <= $2
-    GROUP BY date_trunc('week', fecha_pedido), tipo_vianda
+    WITH platos_vianda AS (${SQL_PLATOS_POR_TIPO_VIANDA})
+    SELECT semana, tipo, COUNT(*)::integer AS cantidad
+    FROM (
+      -- Pedidos viejos: el tipo_vianda de la cabecera, uno por pedido.
+      SELECT
+        to_char(date_trunc('week', p.fecha_pedido), 'YYYY-MM-DD') AS semana,
+        p.tipo_vianda AS tipo
+      FROM pedidos p
+      WHERE p.tipo_vianda IN ('economico', 'saludable', 'low_carb')
+        AND p.cancelado = false
+        AND ${SQL_NO_ES_GRILLA}
+        AND p.fecha_pedido >= $1 AND p.fecha_pedido <= $2
+        AND NOT ${SQL_TIENE_LINEAS}
+
+      UNION ALL
+
+      -- Pedidos nuevos: una por cada línea viva de un plato clasificable.
+      SELECT
+        to_char(date_trunc('week', p.fecha_pedido), 'YYYY-MM-DD') AS semana,
+        pv.tipo
+      FROM pedido_detalle d
+      JOIN pedidos p        ON p.id = d.pedido_id
+      JOIN platos_vianda pv ON pv.id = d.plato_id
+      WHERE d.cancelado = false
+        AND p.cancelado = false
+        AND ${SQL_NO_ES_GRILLA}
+        AND p.fecha_pedido >= $1 AND p.fecha_pedido <= $2
+    ) viandas
+    GROUP BY semana, tipo
   `, [fecha_desde, fecha_hasta])).rows;
 
   const porSemana = new Map();
@@ -369,7 +453,7 @@ async function viandasPorTipoPorSemana(fecha_desde, fecha_hasta) {
     if (!porSemana.has(r.semana)) {
       porSemana.set(r.semana, { semana: r.semana, economico: 0, saludable: 0, low_carb: 0 });
     }
-    porSemana.get(r.semana)[r.tipo_vianda] = r.cantidad;
+    porSemana.get(r.semana)[r.tipo] = r.cantidad;
   }
 
   return [...porSemana.values()].sort((a, b) => a.semana.localeCompare(b.semana));

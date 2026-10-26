@@ -57,34 +57,6 @@
           <div class="nota mt-8">Cada línea es un plato con su cantidad. "Recurrente" se entrega de lunes a viernes dentro del rango; los días sueltos se ajustan después con excepciones, desde la vista de edición del pedido.</div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Tipo de vianda</label>
-          <select id="f-tipo-vianda">
-            <option value="">— No especifica —</option>
-            <option value="economico">Económico</option>
-            <option value="saludable">Saludable</option>
-            <option value="low_carb">Low Carb</option>
-            <option value="modificacion_menu">Modificación de menú</option>
-          </select>
-        </div>
-
-        <div class="form-group hidden" id="grupo-detalle-modificacion">
-          <label class="form-label">Detalle de la modificación</label>
-          <textarea id="f-detalle-modificacion" placeholder="Describí la modificación solicitada"></textarea>
-          <div class="nota mt-8">Requerido cuando el tipo de vianda es "Modificación de menú".</div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Fecha entrega desde</label>
-            <input type="date" id="f-entrega-desde"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Fecha entrega hasta</label>
-            <input type="date" id="f-entrega-hasta"/>
-          </div>
-        </div>
-
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Medio de pago</label>
@@ -114,8 +86,8 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Descripción</label>
-          <textarea id="f-descripcion" placeholder="Ej: Vianda saludable semanal x5"></textarea>
+          <label class="form-label">Notas del pedido</label>
+          <textarea id="f-descripcion" placeholder="Ej: paga con POS, dejar en portería"></textarea>
         </div>
 
         <div class="btn-row">
@@ -193,19 +165,11 @@
 
       document.getElementById('f-estado-pago').addEventListener('change', toggleMontoAbonado);
       toggleMontoAbonado();
-
-      document.getElementById('f-tipo-vianda').addEventListener('change', toggleDetalleModificacion);
-      toggleDetalleModificacion();
     })();
 
     function toggleMontoAbonado() {
       const esParcial = document.getElementById('f-estado-pago').value === 'parcial';
       document.getElementById('grupo-monto-abonado').classList.toggle('hidden', !esParcial);
-    }
-
-    function toggleDetalleModificacion() {
-      const esModificacion = document.getElementById('f-tipo-vianda').value === 'modificacion_menu';
-      document.getElementById('grupo-detalle-modificacion').classList.toggle('hidden', !esModificacion);
     }
 
     // Habilita "Cortesía" solo si el cliente seleccionado es del segmento Embajador.
@@ -450,17 +414,9 @@
       const monto = parseInt(document.getElementById('f-monto').value, 10);
       const estadoPago = document.getElementById('f-estado-pago').value;
       const montoPagadoStr = document.getElementById('f-monto-pagado').value.trim();
-      const tipoVianda = document.getElementById('f-tipo-vianda').value;
-      const detalleModificacion = document.getElementById('f-detalle-modificacion').value.trim();
 
       if (estadoPago === 'parcial' && !montoPagadoStr) {
         errorBox.textContent = 'El monto abonado es requerido para pago parcial.';
-        errorBox.classList.remove('hidden');
-        return;
-      }
-
-      if (tipoVianda === 'modificacion_menu' && !detalleModificacion) {
-        errorBox.textContent = 'El detalle de la modificación es requerido para "Modificación de menú".';
         errorBox.classList.remove('hidden');
         return;
       }
@@ -477,11 +433,7 @@
         monto_pagado,
         estado_pago: estadoPago,
         medio_pago: document.getElementById('f-medio-pago').value,
-        tipo_vianda: tipoVianda,
         descripcion: document.getElementById('f-descripcion').value.trim(),
-        detalle_modificacion: tipoVianda === 'modificacion_menu' ? detalleModificacion : null,
-        fecha_entrega_desde: document.getElementById('f-entrega-desde').value || null,
-        fecha_entrega_hasta: document.getElementById('f-entrega-hasta').value || null,
         ubicacion_id: document.getElementById('f-ubicacion').value || null,
         lineas: recolectarLineas(),
       };

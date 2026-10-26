@@ -4,10 +4,13 @@ const grilla = require('../models/grilla');
 const platos = require('../models/platos');
 const syncPedidos = require('../models/syncPedidos');
 const usuarios = require('../models/usuarios');
+// Las validaciones del alta de un plan están afuera porque las comparte con
+// POST /api/clientes, que también puede crear un plan de comedor (fase 12).
+const compartido = require('./grillaCompartido');
 
 const router = express.Router();
 
-const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
+const { fechaReal, reenviarPlan } = compartido;
 // Techo del alta masiva de colaboradores. UENO, la empresa más grande, tiene
 // ~195 clientes cargados: 200 cubre "seleccionar todos" sin dejar pasar un
 // body absurdo.
@@ -46,15 +49,6 @@ async function requireEditarGrilla(req, res, next) {
 
 // ── Validaciones compartidas ──────────────────────────────────────
 
-// FECHA_RE deja pasar fechas que no existen ('2026-02-31'). Postgres las
-// rechazaría con un 500; acá se devuelve un 400 entendible.
-function fechaReal(iso) {
-  if (!FECHA_RE.test(iso)) return false;
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
-}
-
 // Las tres reglas de una fecha editable de la grilla. Devuelve el mensaje de
 // error, o null si la fecha sirve.
 function errorFechaEditable(fecha) {
@@ -66,19 +60,10 @@ function errorFechaEditable(fecha) {
 
 // Resuelve la empresa del request y corta con el status correcto si no sirve.
 // Devuelve la fila de grilla_empresas, o null si ya respondió.
-async function resolverEmpresa(req, res, valor, { paraEditar = false } = {}) {
-  const empresa = String(valor || '').trim();
-  if (!empresa) {
-    res.status(400).json({ error: 'La empresa es requerida' });
-    return null;
-  }
-  const emp = await grilla.getEmpresa(empresa);
-  if (!emp) {
-    res.status(404).json({ error: 'Esa empresa no tiene grilla de comedor configurada' });
-    return null;
-  }
-  if (paraEditar && !emp.activa) {
-    res.status(400).json({ error: 'La grilla de esa empresa está desactivada' });
+async function resolverEmpresa(req, res, valor, opciones = {}) {
+  const { emp, status, error } = await compartido.resolverEmpresaGrilla(valor, opciones);
+  if (error) {
+    res.status(status).json({ error });
     return null;
   }
   return emp;
@@ -142,21 +127,21 @@ function reenviarPorFechas(empresa, fechas, usuario) {
   return grilla.reenviarSiCorresponde(empresa, fechas.map(f => grilla.lunesDe(f)), usuario);
 }
 
-// Un cambio de plan (plato base, observación, baja) puede afectar cualquier
-// día: se reenvían todas las semanas ya enviadas de hoy en adelante. Las
-// semanas pasadas no se tocan — ya se entregaron.
-async function reenviarPlan(empresa, usuario) {
-  const desde = grilla.lunesDe(grilla.hoyISO());
-  const semanas = await grilla.semanasEnviadas(empresa, { desde });
-  return grilla.reenviarSiCorresponde(empresa, semanas, usuario);
-}
-
 // ── Lectura ───────────────────────────────────────────────────────
 
 // GET /api/grilla/empresas — empresas con comedor configurado.
+//
+// `hoy` viaja acá porque el alta de cliente con "Figura en la grilla" (fase 12)
+// necesita proponer la fecha de alta de hoy y no tiene de dónde sacarla: qué
+// día es hoy se decide en Asunción y en un solo lugar (ver hoyISO en
+// models/pedidoDetalle.js), no en el huso del navegador.
 router.get('/empresas', requireVerGrilla, async (req, res, next) => {
   try {
-    res.json({ empresas: await grilla.listEmpresas(), puede_editar: req.gestionaGrilla === true });
+    res.json({
+      empresas: await grilla.listEmpresas(),
+      puede_editar: req.gestionaGrilla === true,
+      hoy: grilla.hoyISO(),
+    });
   } catch (err) { next(err); }
 });
 
@@ -504,15 +489,8 @@ router.post('/planes', requireEditarGrilla, async (req, res, next) => {
     if (!ids.length) return res.status(400).json({ error: 'Indicá al menos un colaborador' });
     if (ids.length > MAX_ALTAS) return res.status(400).json({ error: `No se pueden dar de alta más de ${MAX_ALTAS} colaboradores por vez` });
 
-    const plato_base_id = Number(body.plato_base_id);
-    if (!Number.isInteger(plato_base_id) || !(await platos.idsActivos([plato_base_id])).has(plato_base_id)) {
-      return res.status(400).json({ error: 'El plato base es inválido, está inactivo o es un ítem del pedido general' });
-    }
-
-    const fecha_alta = String(body.fecha_alta || '').trim();
-    if (!fechaReal(fecha_alta)) return res.status(400).json({ error: 'Fecha de alta inválida (formato YYYY-MM-DD)' });
-
-    const observacion = body.observacion ? String(body.observacion).trim().slice(0, 500) : null;
+    const { datos, error: errPlan } = await compartido.validarDatosPlan(body);
+    if (errPlan) return res.status(400).json({ error: errPlan });
 
     // Todos tienen que ser clientes de esta empresa, y ninguno puede tener ya
     // un plan vigente: reincorporar a alguien dado de baja sí vale, pisar el
@@ -528,7 +506,7 @@ router.post('/planes', requireEditarGrilla, async (req, res, next) => {
     }
     if (errores.length) return res.status(400).json({ error: errores.join('. ') });
 
-    const planes = await grilla.crearPlanes(ids, { plato_base_id, observacion, fecha_alta }, req.user);
+    const planes = await grilla.crearPlanes(ids, datos, req.user);
     const envios = await reenviarPlan(emp.empresa, req.user);
 
     res.status(201).json({ planes, envios });
@@ -556,10 +534,9 @@ router.patch('/planes/:cliente_id', requireEditarGrilla, async (req, res, next) 
     const errores = [];
 
     if (provistos.includes('plato_base_id')) {
-      const plato_base_id = Number(body.plato_base_id);
-      if (!Number.isInteger(plato_base_id) || !(await platos.idsActivos([plato_base_id])).has(plato_base_id)) {
-        errores.push('El plato base es inválido, está inactivo o es un ítem del pedido general');
-      } else cambios.plato_base_id = plato_base_id;
+      const { plato_base_id, error } = await compartido.validarPlatoBase(body.plato_base_id);
+      if (error) errores.push(error);
+      else cambios.plato_base_id = plato_base_id;
     }
 
     if (provistos.includes('observacion')) {
