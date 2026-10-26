@@ -220,3 +220,237 @@ async function cerrarSesion() {
   await api('/api/logout', { method: 'POST' });
   window.location.href = '/login';
 }
+
+// ── A quién se factura (fase 13) ──────────────────────────────────
+// Un control compartido por el form de cliente y el form de pedido: los dos
+// preguntan lo mismo (mismo cliente / otro cliente / otros datos) y el pedido
+// agrega una opción más ("según el cliente"). Está acá y no copiado en las dos
+// vistas para que elegir el destinatario se vea y se valide igual en las dos.
+//
+// Las reglas de validación de verdad son las del backend
+// (models/facturacion.js); lo de acá solo evita el viaje para pedir algo que
+// ya se sabe que falta.
+
+// Cómo se muestra una facturación ya resuelta, en una línea: el nombre y el
+// RUC, o el aviso de que falta. Lo usan la ficha del cliente y el detalle del
+// pedido, que tienen que leerse igual.
+function fmtFacturacion(f) {
+  if (!f) return '—';
+  const nombre = f.nombre || f.cliente_nombre || '';
+  if (!nombre && !f.ruc) return '<span class="text-muted">Sin datos de facturación cargados</span>';
+  const ruc = f.ruc
+    ? 'RUC ' + escapeHtml(f.ruc)
+    : '<span class="text-muted">sin RUC cargado</span>';
+  const quien = nombre ? escapeHtml(nombre) : '<span class="text-muted">sin razón social</span>';
+  return quien + ' · ' + ruc;
+}
+
+// Dibuja el control dentro de `contenedorId`.
+// opciones:
+//   prefijo         → prefijo de los ids que genera (único por pantalla)
+//   conSegunCliente → true en un pedido: agrega la opción por defecto
+//                     "Según el cliente", que es factura_a = null
+//   excluirId       → id de cliente que no puede elegirse como "otro cliente"
+function montarFacturacionDestino(contenedorId, opciones) {
+  const { prefijo, conSegunCliente = false, excluirId = null } = opciones || {};
+  const p = prefijo;
+  const cont = document.getElementById(contenedorId);
+  if (!cont) return;
+
+  cont.dataset.excluirId = excluirId === null ? '' : String(excluirId);
+  cont.dataset.prefijo = p;
+  cont.innerHTML = [
+    conSegunCliente ? opcionFacturacion(p, 'segun_cliente', 'Según el cliente') : '',
+    opcionFacturacion(p, 'mismo', conSegunCliente ? 'Mismo cliente del pedido' : 'Mismo cliente'),
+    opcionFacturacion(p, 'otro_cliente', 'Otro cliente'),
+    opcionFacturacion(p, 'otros', 'Otros datos'),
+    '<div class="nota mt-8" id="' + p + '-resumen"></div>',
+
+    '<div class="hidden mt-8" id="' + p + '-grupo-cliente" style="position:relative;">',
+    '  <label class="form-label">Cliente al que se le factura</label>',
+    '  <input type="text" id="' + p + '-buscar" placeholder="Buscar por nombre o cédula..." autocomplete="off"/>',
+    '  <div id="' + p + '-resultados" class="card hidden" style="position:absolute;z-index:10;width:100%;margin-top:4px;padding:6px;max-height:200px;overflow-y:auto;"></div>',
+    '  <input type="hidden" id="' + p + '-cliente-id"/>',
+    '  <div class="nota mt-8 hidden" id="' + p + '-elegido"></div>',
+    '</div>',
+
+    '<div class="hidden mt-8" id="' + p + '-grupo-otros">',
+    '  <div class="form-row">',
+    '    <div class="form-group">',
+    '      <label class="form-label">Razón social</label>',
+    '      <input type="text" id="' + p + '-razon-social" placeholder="Ej: Comercial San Juan S.A."/>',
+    '    </div>',
+    '    <div class="form-group">',
+    '      <label class="form-label">RUC</label>',
+    '      <input type="text" id="' + p + '-ruc" maxlength="20" placeholder="Ej: 80012345-6"/>',
+    '    </div>',
+    '  </div>',
+    '  <div class="form-group">',
+    '    <label class="form-label">Email para la factura</label>',
+    '    <input type="email" id="' + p + '-email" placeholder="facturacion@ejemplo.com"/>',
+    '  </div>',
+    '</div>',
+  ].join('\n');
+
+  cont.querySelectorAll('input[name="' + p + '-modo"]').forEach(function (r) {
+    r.addEventListener('change', function () { refrescarFacturacionDestino(p); });
+  });
+
+  // Buscador de clientes: el mismo endpoint que usa el alta de pedido. No se
+  // filtra por activos — el marido al que va la factura puede no pedir nunca
+  // nada y estar inactivo, y la factura igual va a su nombre.
+  const buscar = document.getElementById(p + '-buscar');
+  let timer = null;
+  buscar.addEventListener('input', function () {
+    document.getElementById(p + '-cliente-id').value = '';
+    document.getElementById(p + '-elegido').classList.add('hidden');
+    clearTimeout(timer);
+    const q = buscar.value.trim();
+    if (!q) { document.getElementById(p + '-resultados').classList.add('hidden'); return; }
+    timer = setTimeout(function () { buscarClientesFacturacion(contenedorId, p, q); }, 250);
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#' + p + '-resultados') && e.target.id !== p + '-buscar') {
+      document.getElementById(p + '-resultados').classList.add('hidden');
+    }
+  });
+
+  const porDefecto = conSegunCliente ? 'segun_cliente' : 'mismo';
+  cont.querySelector('input[name="' + p + '-modo"][value="' + porDefecto + '"]').checked = true;
+  refrescarFacturacionDestino(p);
+}
+
+function opcionFacturacion(p, valor, etiqueta) {
+  return '<label class="form-label" style="font-weight:normal;text-transform:none;display:block;">'
+    + '<input type="radio" name="' + p + '-modo" value="' + valor + '"/> ' + etiqueta
+    + '</label>';
+}
+
+function modoFacturacion(p) {
+  const marcado = document.querySelector('input[name="' + p + '-modo"]:checked');
+  return marcado ? marcado.value : 'mismo';
+}
+
+function refrescarFacturacionDestino(p) {
+  const modo = modoFacturacion(p);
+  document.getElementById(p + '-grupo-cliente').classList.toggle('hidden', modo !== 'otro_cliente');
+  document.getElementById(p + '-grupo-otros').classList.toggle('hidden', modo !== 'otros');
+}
+
+async function buscarClientesFacturacion(contenedorId, p, q) {
+  const cont = document.getElementById(p + '-resultados');
+  const excluir = document.getElementById(contenedorId).dataset.excluirId;
+  let encontrados = [];
+  try {
+    encontrados = (await api('/api/clientes?q=' + encodeURIComponent(q))).clientes;
+  } catch (e) {
+    cont.innerHTML = '<div class="empty-state" style="padding:10px;">No se pudo buscar.</div>';
+    cont.classList.remove('hidden');
+    return;
+  }
+
+  const candidatos = encontrados.filter(function (c) { return String(c.id) !== String(excluir); }).slice(0, 8);
+  if (!candidatos.length) {
+    cont.innerHTML = '<div class="empty-state" style="padding:10px;">Sin resultados.</div>';
+  } else {
+    cont.innerHTML = candidatos.map(function (c) {
+      return '<div class="fact-resultado" data-id="' + c.id + '"'
+        + ' data-nombre="' + escapeHtml(c.nombre_completo) + '"'
+        + ' data-ruc="' + escapeHtml(c.ruc || '') + '"'
+        + ' style="padding:8px 10px;cursor:pointer;border-radius:8px;font-size:11px;">'
+        + '<strong>' + escapeHtml(c.nombre_completo) + '</strong>'
+        + ' <span class="text-muted">· ' + escapeHtml(c.cedula || '') + ' · '
+        + (c.ruc ? 'RUC ' + escapeHtml(c.ruc) : 'sin RUC cargado') + '</span>'
+        + '</div>';
+    }).join('');
+    cont.querySelectorAll('.fact-resultado').forEach(function (el) {
+      el.addEventListener('mouseenter', function () { el.style.background = 'var(--beige)'; });
+      el.addEventListener('mouseleave', function () { el.style.background = ''; });
+      el.addEventListener('click', function () {
+        elegirClienteFacturacion(p, el.dataset.id, el.dataset.nombre, el.dataset.ruc);
+      });
+    });
+  }
+  cont.classList.remove('hidden');
+}
+
+function elegirClienteFacturacion(p, id, nombre, ruc) {
+  document.getElementById(p + '-cliente-id').value = id;
+  document.getElementById(p + '-buscar').value = '';
+  document.getElementById(p + '-resultados').classList.add('hidden');
+  const box = document.getElementById(p + '-elegido');
+  box.innerHTML = 'Se factura a <strong>' + escapeHtml(nombre) + '</strong> · '
+    + (ruc
+      ? 'RUC ' + escapeHtml(ruc)
+      : '<strong>sin RUC cargado</strong> (se puede cargar después, en la ficha de esa persona)');
+  box.classList.remove('hidden');
+}
+
+// Deja el control mostrando una facturación ya guardada.
+// valores: las cinco columnas tal cual están en la base y, opcionales,
+// cliente_nombre / cliente_ruc del elegido, para poder mostrarlo sin ir a
+// buscarlo de nuevo.
+function setFacturacionDestino(p, valores) {
+  const v = valores || {};
+  const tieneSegunCliente = !!document.querySelector('input[name="' + p + '-modo"][value="segun_cliente"]');
+  const modo = v.factura_a || (tieneSegunCliente ? 'segun_cliente' : 'mismo');
+  const radio = document.querySelector('input[name="' + p + '-modo"][value="' + modo + '"]');
+  if (radio) radio.checked = true;
+
+  if (modo === 'otro_cliente' && v.factura_cliente_id) {
+    elegirClienteFacturacion(
+      p, v.factura_cliente_id,
+      v.cliente_nombre || ('Cliente #' + v.factura_cliente_id),
+      v.cliente_ruc || ''
+    );
+  }
+  if (modo === 'otros') {
+    document.getElementById(p + '-razon-social').value = v.factura_razon_social || '';
+    document.getElementById(p + '-ruc').value = v.factura_ruc || '';
+    document.getElementById(p + '-email').value = v.factura_email || '';
+  }
+  refrescarFacturacionDestino(p);
+}
+
+// Qué no puede elegirse como "otro cliente". En el form de pedido cambia al
+// elegir el cliente del pedido.
+function setFacturacionExcluido(contenedorId, id) {
+  const cont = document.getElementById(contenedorId);
+  if (cont) cont.dataset.excluirId = (id === null || id === undefined) ? '' : String(id);
+}
+
+// La línea gris que dice a quién iría la factura si no se toca nada.
+function setFacturacionResumen(p, html) {
+  const box = document.getElementById(p + '-resumen');
+  if (box) box.innerHTML = html || '';
+}
+
+// Lo que va al body del request. Devuelve { datos } o { error }.
+// Las mismas dos reglas que exige el backend: razón social y RUC obligatorios
+// en "otros datos", y un cliente elegido en "otro cliente".
+function leerFacturacionDestino(p) {
+  const modo = modoFacturacion(p);
+
+  if (modo === 'segun_cliente') return { datos: { factura_a: null } };
+  if (modo === 'mismo') return { datos: { factura_a: 'mismo' } };
+
+  if (modo === 'otro_cliente') {
+    const id = document.getElementById(p + '-cliente-id').value;
+    if (!id) return { error: 'Elegí el cliente al que se le factura.' };
+    return { datos: { factura_a: 'otro_cliente', factura_cliente_id: Number(id) } };
+  }
+
+  const razon = document.getElementById(p + '-razon-social').value.trim();
+  const ruc = document.getElementById(p + '-ruc').value.trim();
+  const email = document.getElementById(p + '-email').value.trim();
+  if (!razon) return { error: 'La razón social es requerida cuando se factura a otros datos.' };
+  if (!ruc) return { error: 'El RUC es requerido cuando se factura a otros datos.' };
+  return {
+    datos: {
+      factura_a: 'otros',
+      factura_razon_social: razon,
+      factura_ruc: ruc,
+      factura_email: email || null,
+    },
+  };
+}

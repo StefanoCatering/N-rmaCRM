@@ -79,8 +79,12 @@ async function existsCedula(cedula, excludeId = null) {
 async function create(data, ejecutor = pool) {
   const result = await ejecutor.query(`
     INSERT INTO clientes
-      (nombre_completo, cedula, email, telefono, telefono2, telefono3, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso, observaciones, tipo_envase)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      (nombre_completo, cedula, email, telefono, telefono2, telefono3, segmento, empresa, canal_origen, codigo_embajador, estado, fecha_ingreso, observaciones, tipo_envase,
+       razon_social, ruc, email_facturacion,
+       factura_a, factura_cliente_id, factura_razon_social, factura_ruc, factura_email)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+            $15, $16, $17,
+            $18, $19, $20, $21, $22)
     RETURNING id
   `, [
     data.nombre_completo,
@@ -97,6 +101,18 @@ async function create(data, ejecutor = pool) {
     data.fecha_ingreso,
     data.observaciones || null,
     data.tipo_envase || 'Venezia',
+    // Facturación (fase 13). Los datos propios del cliente y, aparte, a quién
+    // se le facturan sus pedidos: los normaliza y valida models/facturacion.js,
+    // así que acá llegan listos. Sin nada cargado queda factura_a = 'mismo',
+    // que es el default de la columna y el caso mayoritario.
+    data.razon_social || null,
+    data.ruc || null,
+    data.email_facturacion || null,
+    data.factura_a || 'mismo',
+    data.factura_cliente_id || null,
+    data.factura_razon_social || null,
+    data.factura_ruc || null,
+    data.factura_email || null,
   ]);
   return getById(result.rows[0].id, ejecutor);
 }
@@ -117,8 +133,17 @@ async function update(id, data) {
       fecha_ingreso    = $11,
       observaciones    = $12,
       tipo_envase      = $13,
+      -- Facturación (fase 13)
+      razon_social         = $14,
+      ruc                  = $15,
+      email_facturacion    = $16,
+      factura_a            = $17,
+      factura_cliente_id   = $18,
+      factura_razon_social = $19,
+      factura_ruc          = $20,
+      factura_email        = $21,
       updated_at       = NOW()
-    WHERE id = $14
+    WHERE id = $22
   `, [
     data.nombre_completo,
     data.cedula,
@@ -133,6 +158,14 @@ async function update(id, data) {
     data.fecha_ingreso,
     data.observaciones || null,
     data.tipo_envase || 'Venezia',
+    data.razon_social || null,
+    data.ruc || null,
+    data.email_facturacion || null,
+    data.factura_a || 'mismo',
+    data.factura_cliente_id || null,
+    data.factura_razon_social || null,
+    data.factura_ruc || null,
+    data.factura_email || null,
     id,
   ]);
   return getById(id);
@@ -156,6 +189,22 @@ async function listColaboradores(empresa, excludeId) {
     WHERE empresa = $1 AND id != $2
     ORDER BY nombre_completo ASC
   `, [empresa, excludeId]);
+  return result.rows;
+}
+
+// Quiénes facturan a NOMBRE de este cliente (fase 13): el marido al que la
+// señora le factura sus pedidos necesita verlo en su propia ficha, porque es
+// él quien recibe la factura y quien pregunta por qué le llegó.
+//
+// Solo los que lo tienen configurado a nivel cliente. Un pedido suelto con
+// override no entra: eso se ve en el pedido.
+async function listFacturanA(clienteId) {
+  const result = await pool.query(`
+    SELECT id, nombre_completo
+    FROM clientes
+    WHERE factura_cliente_id = $1
+    ORDER BY nombre_completo ASC
+  `, [clienteId]);
   return result.rows;
 }
 
@@ -354,6 +403,7 @@ module.exports = {
   marcarSeguimiento,
   listEmpresas,
   listColaboradores,
+  listFacturanA,
   countActivos,
   countAlertas,
   listAlertas,

@@ -1,5 +1,6 @@
 const pool = require('./db');
 const detalle = require('./pedidoDetalle');
+const facturacion = require('./facturacion');
 
 // Registra una entrada en pedidos_auditoria. Es el mismo patrón de auditoría
 // obligatoria que ya usaban update() y cancelar(), extraído para poder reusarlo
@@ -475,6 +476,10 @@ async function create({
   cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
   fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id, lineas = [],
   recibido_por = null, usuario,
+  // Facturación (fase 13): el override de ESTE pedido. factura_a en null
+  // —el caso normal— significa "según el cliente", y se resuelve al leer.
+  factura_a = null, factura_cliente_id = null,
+  factura_razon_social = null, factura_ruc = null, factura_email = null,
 }) {
   const client = await pool.connect();
   try {
@@ -483,8 +488,10 @@ async function create({
     const result = await client.query(
       `INSERT INTO pedidos
          (cliente_id, fecha_pedido, monto, monto_pagado, estado_pago, medio_pago, tipo_vianda, descripcion,
-          fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id, recibido_por)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          fecha_entrega_desde, fecha_entrega_hasta, detalle_modificacion, ubicacion_id, recibido_por,
+          factura_a, factura_cliente_id, factura_razon_social, factura_ruc, factura_email)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+               $14, $15, $16, $17, $18)
        RETURNING *`,
       [
         cliente_id,
@@ -500,6 +507,11 @@ async function create({
         detalle_modificacion || null,
         ubicacion_id || null,
         recibido_por || null,
+        factura_a || null,
+        factura_cliente_id || null,
+        factura_razon_social || null,
+        factura_ruc || null,
+        factura_email || null,
       ]
     );
     const pedido = result.rows[0];
@@ -556,6 +568,16 @@ async function getConDetalle(id) {
   // el encabezado del detalle no muestre una entrega distinta de la columna
   // "Entrega" del mismo pedido.
   Object.assign(pedido, entregaEfectiva(pedido, fechasDeLineas(pedido.lineas)));
+
+  // A nombre de quién se factura (fase 13), resuelto acá y no copiado: si el
+  // pedido dice "según el cliente", sale lo que el cliente diga HOY.
+  //
+  // El pedido semanal del comedor queda afuera: su facturación no pasa por el
+  // CRM (nace con monto 0) y mostrar un destinatario daría a entender que de
+  // acá sale algo. Así además no se paga la consulta extra.
+  pedido.facturacion = pedido.origen === 'grilla'
+    ? null
+    : await facturacion.resolverPedido(pedido, await facturacion.filaDeCliente(pedido.cliente_id));
 
   return pedido;
 }
